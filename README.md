@@ -8,7 +8,11 @@ An **XAUUSD (M5)** entry-alert system that pushes signals to Telegram:
 Donchian breakouts with trend filters, automatic journaling, entry charts,
 position monitoring (TP1/TP2/TP3 + breakeven), and weekly performance reviews.
 
-## Strategy (v1.3, live)
+## Strategy (v1.2, live)
+
+> System release v1.3 = v1.2 strategy + runner tracking notifications
+> (TP2/TP3/breakeven alerts after TP1). The signal logic itself is unchanged
+> since v1.2 — the journal still records `strategy_v=1.2`.
 
 | Component | Detail |
 |---|---|
