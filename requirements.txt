@@ -1,0 +1,10 @@
+# Third-party Python dependencies.
+# Everything else used by this repo is Python standard library.
+#
+# Install:  pip install -r requirements.txt
+
+matplotlib>=3.6
+
+# NOTE: data/*.py import `dynamic_credentials` from a Hatch-specific path
+# (/opt/hatch/skills/skill-creator/bin). Outside that environment, replace
+# those calls with your API key from .env (see README.md "Installation").
