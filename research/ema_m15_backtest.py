@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
-"""ema_m15_backtest.py — uji EMA20/50 STATE di M15 sebagai filter tambahan
-pada strategi XAUUSD v1.2 (v1.1 + filter EMA20/50 state @H1, live sejak 2026-10-07).
+"""ema_m15_backtest.py — test EMA20/50 STATE on M15 as an additional filter
+on the XAUUSD v1.2 strategy (v1.1 + EMA20/50 state @H1 filter, live since 2026-10-07).
 
-Basis: ema_filter_backtest.py (pola run_ema, harness tervalidasi fix6sl_backtest).
-READ-ONLY terhadap sistem live.
+Basis: ema_filter_backtest.py (run_ema pattern, validated fix6sl_backtest harness).
+READ-ONLY on the live system.
 
-Varian (sinyal harus lolos filter H4 dulu, seperti live):
+Variants (signals must first pass the H4 filter, as in live):
   v12 : baseline v1.2 = v1.1 + EMA20/50 state @H1
   G1  : v1.2 + EMA20/50 state @M15 (H4 + EMA-H1 + EMA-M15)
-  G2p : v1.1 + EMA20/50 state @M15 MENGGANTIKAN filter EMA-H1 (tanpa EMA-H1)
+  G2p : v1.1 + EMA20/50 state @M15 REPLACING the EMA-H1 filter (no EMA-H1)
 
-M15 diresample dari bar M5 (pola sama seperti H1 di fix6sl_backtest).
-Tanpa lookahead: untuk sinyal di bar M5 index i (open ts), dipakai bar M15
-terakhir yang SUDAH close: k = bisect_left(m15t, ts - ts%900) - 1.
+M15 is resampled from M5 bars (same pattern as H1 in fix6sl_backtest).
+No lookahead: for a signal on M5 bar index i (open ts), the LAST already-closed
+M15 bar is used: k = bisect_left(m15t, ts - ts%900) - 1.
 
-Diagnostik: tiap sinyal kandidat dicatat kombinasi (h1_ok, m15_ok) untuk
-mengukur redundansi kedua filter; sinyal ter-suppress dijalankan sebagai
-phantom trade per filter penyebabnya (PF_sup).
+Diagnostics: each candidate signal records its (h1_ok, m15_ok) combination to
+measure redundancy between the two filters; suppressed signals are run as
+phantom trades per responsible filter (PF_sup).
 """
 import sys, calendar, datetime, bisect
 sys.path.insert(0, "/home/hatch/workspace/trading-ea/research")
@@ -37,7 +37,7 @@ def ema(values, period):
         out[i] = out[period - 1]
     return out
 
-# --- M15 resample dari M5 (pola sama seperti H1 di fix6sl_backtest) ---
+# --- M15 resampled from M5 (same pattern as H1 in fix6sl_backtest) ---
 m15 = []
 bkt = None
 for t, o, h, l, c in bars:
@@ -63,8 +63,8 @@ diff_h1 = [a - b for a, b in zip(ema(h1c, 20), ema(h1c, 50))]
 
 def run_m15(mode, t_start, t_end):
     """Mirror run_ema; mode in {'v12','G1','G2p'}.
-    Return (trades, sup_h1, sup_m15, combos) dengan combos = dict
-    {(h1_ok, m15_ok): count} atas semua sinyal kandidat pasca-H4."""
+    Return (trades, sup_h1, sup_m15, combos) with combos = dict
+    {(h1_ok, m15_ok): count} over all post-H4 candidate signals."""
     trades, sup_h1, sup_m15 = [], [], []
     combos = {(True, True): 0, (True, False): 0, (False, True): 0, (False, False): 0}
     live_pos = None
@@ -217,7 +217,7 @@ if __name__ == "__main__":
     combos_all = {}
     for mode, label in [("v12", "v1.2 BASELINE (H4+EMA-H1)"),
                         ("G1", "G1 v1.2 + EMA-M15"),
-                        ("G2p", "G2p v1.1 + EMA-M15 (ganti H1)")]:
+                        ("G2p", "G2p v1.1 + EMA-M15 (replaces H1)")]:
         for pname, ps, pe in [("Jan-Oct", JAN, END), ("Sep-Oct", SEP, END)]:
             tr, sh1, sm15, combos = run_m15(mode, ps, pe)
             pf, rs = pf_of(tr)
@@ -236,16 +236,16 @@ if __name__ == "__main__":
                                        len(sh1), ph1, len(sm15), pm15)
             if pname == "Jan-Oct":
                 combos_all[label] = combos
-    print("\nRedundansi filter (sinyal kandidat pasca-H4, Jan-Okt):")
+    print("\nFilter redundancy (post-H4 candidate signals, Jan-Oct):")
     for label, cb in combos_all.items():
         tt = sum(cb.values())
         tT = cb[(True, True)] + cb[(True, False)]
         tF = cb[(False, True)] + cb[(False, False)]
         mT = cb[(True, True)] + cb[(False, True)]
-        print(f"  {label:28s}: total={tt} | H1 lolos={tT} (M15 buang {cb[(True, False)]} = "
-              f"{cb[(True, False)]/tT*100:.1f}% di antaranya) | M15 lolos={mT} (H1 buang "
-              f"{cb[(False, True)]} = {cb[(False, True)]/mT*100:.1f}% di antaranya) | "
-              f"keduanya buang={cb[(False, False)]}")
+        print(f"  {label:28s}: total={tt} | H1 passes={tT} (M15 drops {cb[(True, False)]} = "
+              f"{cb[(True, False)]/tT*100:.1f}% of them) | M15 passes={mT} (H1 drops "
+              f"{cb[(False, True)]} = {cb[(False, True)]/mT*100:.1f}% of them) | "
+              f"both drop={cb[(False, False)]}")
     import json
     json.dump({f"{k[0]}|{k[1]}": v for k, v in results.items()},
               open("/tmp/ema_m15_results.json", "w"))

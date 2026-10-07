@@ -1,103 +1,103 @@
-# Investigasi 6 SL Beruntun XAUUSD — Hasil Riset (2026-10-06)
+# Investigating 6 Consecutive XAUUSD SLs — Research Results (2026-10-06)
 
-**Pertanyaan user:** "perbaiki signalnya" setelah 6 SL beruntun (-6R, ~-112 USC ≈ 19% modal).
-**Metode:** rekonstruksi konteks 6 trade + re-backtest v1.1 di data terbaru + uji 3 kandidat perbaikan.
-**Batasan:** tidak ada file live yang diubah. Semua angka dari backtest PAXGUSDT (Binance spot, proxy XAUUSD).
+**User's question:** "fix the signals" after 6 consecutive SLs (-6R, ~-112 USC ≈ 19% of capital).
+**Method:** reconstructing the context of the 6 trades + re-backtesting v1.1 on the latest data + testing 3 fix candidates.
+**Constraint:** no live files were changed. All numbers from the PAXGUSDT backtest (Binance spot, XAUUSD proxy).
 
 ---
 
-## 1. Pola 6 loss (jurnal 2026-10-05 s/d 2026-10-06)
+## 1. The 6-loss pattern (journal 2026-10-05 to 2026-10-06)
 
-| # | Sinyal | Waktu (WIB) | Sesi | H4 | Hasil |
+| # | Signal | Time (WIB) | Session | H4 | Outcome |
 |---|---|---|---|---|---|
-| 1 | BUY @4162.15 | 05 Okt 14:50 | London | (v1.0, tanpa filter) | SL -1R |
-| 2 | BUY @4168.28 | 05 Okt 15:10 | London | (v1.0) | SL -1R |
-| 3 | BUY @4165.04 | 05 Okt 15:45 | London | (v1.0) | SL -1R |
-| 4 | SELL @4126 | 06 Okt 00:10 | New York | BEARISH ✓ | SL -1R |
-| 5 | SELL @4125 | 06 Okt 09:35 | Asia | BEARISH ✓ | SL -1R |
-| 6 | BUY @4177 | 06 Okt 19:00 | London | BULLISH ✓ | SL -1R |
+| 1 | BUY @4162.15 | 05 Oct 14:50 | London | (v1.0, no filter) | SL -1R |
+| 2 | BUY @4168.28 | 05 Oct 15:10 | London | (v1.0) | SL -1R |
+| 3 | BUY @4165.04 | 05 Oct 15:45 | London | (v1.0) | SL -1R |
+| 4 | SELL @4126 | 06 Oct 00:10 | New York | BEARISH ✓ | SL -1R |
+| 5 | SELL @4125 | 06 Oct 09:35 | Asia | BEARISH ✓ | SL -1R |
+| 6 | BUY @4177 | 06 Oct 19:00 | London | BULLISH ✓ | SL -1R |
 
-**Temuan pola:**
-- **Keenamnya tidak pernah menyentuh TP1** (MFE maksimal 0.89R, dua di antaranya 0.00R — langsung balik arah). Ini mode loss yang "bersih": breakout palsu, bukan hampir-profit.
-- **3 dari 6 adalah sinyal stacked v1.0** (trade 1–3, selisih 20–35 menit). Aturan one-position-at-a-time di v1.1 (sudah live) akan men-suppress trade 2 dan 3. Di bawah logika live saat ini, rangkaiannya hanya 4 SL (-4R), bukan 6.
-- **Tidak ada pola sesi** (London 4×, NY 1×, Asia 1×). Filter H4 bekerja sesuai desain (semua sinyal searah trend) tapi tidak menyelamatkan — breakout searah trend pun bisa whipsaw.
-- **Tidak ada rilis ekonomi FRED** (NFP/CPI/PPI/GDP) dalam ±1 hari dari keenam sinyal. FOMC memang tidak ter-cover kalender (blind spot struktural yang sudah diketahui).
-- **Caveat feed:** data Binance PAXGUSDT memuat wick $4230 pada 2 Okt yang (dilihat dari sinyal live yang tetap fire) tidak ada di feed Twelve Data XAU/USD. Akibatnya boundary Donchian di backtest ≠ boundary live untuk sinyal yang mepet — rekonstruksi kondisi sinyal live per-trade di data Binance tidak 100% akurat. Backtest tetap valid sebagai uji *strategi*, tapi bukan replika 1:1 sinyal live.
+**Pattern findings:**
+- **All six never touched TP1** (max MFE 0.89R, two of them 0.00R — immediately reversed). This is a "clean" loss mode: fake breakouts, not near-profits.
+- **3 of the 6 were stacked v1.0 signals** (trades 1–3, 20–35 minutes apart). The one-position-at-a-time rule in v1.1 (already live) would suppress trades 2 and 3. Under the current live logic, the streak is only 4 SLs (-4R), not 6.
+- **No session pattern** (London 4×, NY 1×, Asia 1×). The H4 filter worked as designed (all signals trend-aligned) but didn't save them — trend-aligned breakouts can whipsaw too.
+- **No FRED economic releases** (NFP/CPI/PPI/GDP) within ±1 day of all six signals. FOMC is indeed not covered by the calendar (a known structural blind spot).
+- **Feed caveat:** the Binance PAXGUSDT data contains a $4230 wick on 2 Oct that (judging by live signals that still fired) is absent from the Twelve Data XAU/USD feed. As a result, the Donchian boundary in the backtest ≠ the live boundary for borderline signals — reconstructing per-trade live signal conditions in Binance data is not 100% accurate. The backtest remains valid as a *strategy* test, but not as a 1:1 replica of live signals.
 
-**Apakah 6 SL beruntun anomali?** Tidak. Di backtest v1.1 Jan–Okt (265 trade), streak SL terpanjang = **tepat 6**, dan kejadian streak ≥6 SL muncul **3× dalam 9 bulan**. Yang dialami user = skenario terburuk yang sudah diketahui, bukan kerusakan strategi.
+**Is a 6-SL streak anomalous?** No. In the v1.1 Jan–Oct backtest (265 trades), the longest SL streak = **exactly 6**, and streaks of ≥6 SLs occurred **3× in 9 months**. What the user experienced = the known worst-case scenario, not a broken strategy.
 
 ---
 
-## 2. Re-backtest v1.1 di data terbaru (Sep–Okt 2026)
+## 2. Re-backtesting v1.1 on the latest data (Sep–Oct 2026)
 
-Replikasi setia logika live (Donchian(48) H1, trigger M5, SL 1.5×ATR H1, transition-only, H4 filter, one-position). Harness divalidasi: replika `m5_check2.py` menghasilkan n=529/PF=1.09 vs acuan riset n=520/PF=1.10 (match).
+Faithful replica of the live logic (Donchian(48) H1, M5 trigger, SL 1.5×ATR H1, transition-only, H4 filter, one-position). Harness validated: the `m5_check2.py` replica yields n=529/PF=1.09 vs the research reference n=520/PF=1.10 (match).
 
-| Periode | n | Win% | PF | avgR | Total R | MaxDD |
+| Period | n | Win% | PF | avgR | Total R | MaxDD |
 |---|---|---|---|---|---|---|
-| v1.1 Jan–Okt 2026 | 265 | 31.3 | **1.23** | +0.11 | +29.1 | 19.1 |
-| v1.1 **Sep–Okt 2026** | 31 | 19.4 | **0.75** | -0.13 | -4.0 | 11.0 |
+| v1.1 Jan–Oct 2026 | 265 | 31.3 | **1.23** | +0.11 | +29.1 | 19.1 |
+| v1.1 **Sep–Oct 2026** | 31 | 19.4 | **0.75** | -0.13 | -4.0 | 11.0 |
 
-**Edge melemah di data terbaru** (PF 0.75, n=31). Tapi ini konsisten dengan temuan riset sebelumnya (Q3 2026 PF 0.94 — kuartal merah memang terjadi). Sampel Sep–Okt kecil (31 trade); belum cukup bukti untuk menyatakan edge hilang permanen.
+**The edge weakened in the latest data** (PF 0.75, n=31). But this is consistent with earlier research findings (Q3 2026 PF 0.94 — red quarters do happen). The Sep–Oct sample is small (31 trades); not enough evidence to declare the edge permanently gone.
 
-Per bulan (v1.1): Jan PF 2.91 → Feb 1.17 → Mar 1.39 → Apr 1.08 → Mei 1.00 → Jun 1.68 → **Jul 0.48** → Agu 1.08 → **Sep 0.86** → Okt 0.00 (n=3). Sistem trend-following: panen saat trending (Jan, Jun), berdarah saat choppy (Jul, Sep).
+By month (v1.1): Jan PF 2.91 → Feb 1.17 → Mar 1.39 → Apr 1.08 → May 1.00 → Jun 1.68 → **Jul 0.48** → Aug 1.08 → **Sep 0.86** → Oct 0.00 (n=3). Trend-following system: harvests when trending (Jan, Jun), bleeds when choppy (Jul, Sep).
 
 ---
 
-## 3. Uji kandidat perbaikan (maksimal 3)
+## 3. Testing fix candidates (max 3)
 
-Semua diuji di data yang SAMA (Sep–Okt dan Jan–Okt). Yang sudah pernah ditolak (filter sesi, SL 2.0×, TP1 0.75R) tidak diuji ulang.
+All tested on the SAME data (Sep–Oct and Jan–Oct). Previously rejected ideas (session filter, 2.0× SL, 0.75R TP1) were not re-tested.
 
-### C1: Syarat breakout minimal (depth ≥ 0.3×ATR) — ❌ DITOLAK TEGAS
-Alasan awal: keenam loss tampak seperti breakout "tipis". Hasil:
+### C1: Minimum breakout depth requirement (depth ≥ 0.3×ATR) — ❌ REJECTED DECISIVELY
+Initial reasoning: the six losses looked like "thin" breakouts. Results:
 
-| Periode | Baseline v1.1 | C1 |
+| Period | Baseline v1.1 | C1 |
 |---|---|---|
-| Sep–Okt | PF 0.75 (n=31) | PF **0.50** (n=14) |
-| Jan–Okt | PF 1.23 (n=265) | PF **0.93** (n=117) |
+| Sep–Oct | PF 0.75 (n=31) | PF **0.50** (n=14) |
+| Jan–Oct | PF 1.23 (n=265) | PF **0.93** (n=117) |
 
-Diagnostik tambahan: trade dengan depth < 0.3 ATR justru **PF 1.49** (n=171), sedangkan depth ≥ 0.3 ATR **PF 0.83** (n=94). Median depth trade WIN (0.14 ATR) < trade LOSS (0.21 ATR). **Edge strategi ini justru ada di breakout awal yang tipis** — menunggu konfirmasi lebih dalam malah masuk telat. Ini contoh textbook kenapa filter tidak boleh dirancang dari 6 trade.
+Additional diagnostics: trades with depth < 0.3 ATR actually had **PF 1.49** (n=171), while depth ≥ 0.3 ATR had **PF 0.83** (n=94). Median depth of WIN trades (0.14 ATR) < LOSS trades (0.21 ATR). **This strategy's edge is precisely in the thin, early breakouts** — waiting for deeper confirmation means entering late. This is a textbook example of why filters must never be designed from 6 trades.
 
-### C2: Cooldown 12 jam setelah SL — ⚠️ MENARIK, tapi tipis
-Alasan: loss berkerumun saat pasar choppy; jeda setelah SL menghindari whipsaw lanjutan.
+### C2: 12-hour cooldown after SL — ⚠️ INTERESTING, but thin
+Reasoning: losses cluster when the market is choppy; a pause after an SL avoids follow-on whipsaw.
 
-| Periode | Baseline v1.1 | C2 (12h) |
+| Period | Baseline v1.1 | C2 (12h) |
 |---|---|---|
-| Sep–Okt | PF 0.75, totR -4.0 (n=31) | PF **0.86**, totR -2.0 (n=27) |
-| Jan–Okt | PF 1.23, totR +29.1 (n=265) | PF **1.31**, totR +30.6 (n=213) |
+| Sep–Oct | PF 0.75, totR -4.0 (n=31) | PF **0.86**, totR -2.0 (n=27) |
+| Jan–Oct | PF 1.23, totR +29.1 (n=265) | PF **1.31**, totR +30.6 (n=213) |
 
-Robustness parameter (dipilih arbitrer sebelum uji, lalu di-bracket): 6h → PF 1.24/0.80; 24h → PF 1.37/1.00. Arah perbaikan konsisten di semua parameter dan kedua periode — bukan hasil cherry-pick satu angka. Harga: frekuensi trade turun ~20%.
+Parameter robustness (chosen arbitrarily before testing, then bracketed): 6h → PF 1.24/0.80; 24h → PF 1.37/1.00. The direction of improvement is consistent across all parameters and both periods — not a cherry-picked single number. Price: trade frequency down ~20%.
 
-### C3: Skip saat ledakan volatilitas (ATR > 2× median 20) — ❌ TIDAK BERGUNA
-Hampir tidak ada sinyal yang tersaring (n=264 vs 265). Kondisi yang dimaksud praktis tidak pernah terjadi di data 9 bulan. Ditolak.
-
----
-
-## 4. Proposal (maksimal 2, angka jujur)
-
-### Proposal A: Tambah cooldown 12 jam pasca-SL (butuh diskusi + approval)
-- Ekspektasi dari backtest: PF 1.23 → ~1.31 (Jan–Okt), drawdown Sep–Okt -4.0R → -2.0R. Perbaikan **kecil** (+0.08 PF), bukan obat mujarab.
-- Mekanisme masuk akal (hindari chop pasca-loss), konsisten di 6h/12h/24h — tapi tetap bisa jadi noise. Bukan janji profit.
-- Biaya: ~20% lebih sedikit sinyal. Tidak mengubah definisi sinyal, hanya jeda antar-trade setelah rugi — overlay risk-management, bukan otak-atik logika entry.
-- **Belum diimplementasikan.** Menunggu persetujuan eksplisit user sesuai aturan.
-
-### Proposal B: Jangan ubah apa-apa (opsi valid)
-- 6 SL = streak terburuk yang *diharapkan* muncul ~3×/tahun menurut backtest 9 bulan. Sistem berperilaku sesuai distribusinya.
-- 2 dari 6 loss berasal dari stacking v1.0 yang sudah diperbaiki one-position-at-a-time di v1.1.
-- Kelemahan Sep–Okt (PF 0.75) konsisten dengan Q3 merah yang sudah diketahui; n=31 terlalu kecil untuk vonis "edge hilang".
-- Biarkan learning loop (review Minggu) yang menilai dengan data lebih banyak.
+### C3: Skip during volatility explosions (ATR > 2× 20-median) — ❌ USELESS
+Almost no signals were filtered (n=264 vs 265). The condition practically never occurs in 9 months of data. Rejected.
 
 ---
 
-## 5. Peringatan overfitting & caveat
-- **6 trade = sampel anekdot.** C1 adalah buktinya: pola yang "jelas" di 6 trade ternyata terbalik di 265 trade. Jangan pernah tuning dari streak.
-- Gain C2 (+0.08 PF) tipis dan bisa noise; jangan oversell.
-- Backtest feed (Binance PAXGUSDT) ≠ live feed (Twelve Data XAU/USD); sinyal boundary-touching bisa berbeda.
-- Tanpa spread/komisi/slippage — PF live akan lebih rendah dari semua angka di atas.
-- 265 trade masih sampel sedang; edge bisa hilang berbulan-bulan (terbukti Jul & Sep).
+## 4. Proposals (max 2, honest numbers)
+
+### Proposal A: Add 12-hour post-SL cooldown (needs discussion + approval)
+- Backtest expectation: PF 1.23 → ~1.31 (Jan–Oct), Sep–Oct drawdown -4.0R → -2.0R. A **small** improvement (+0.08 PF), not a miracle cure.
+- Mechanism makes sense (avoid post-loss chop), consistent at 6h/12h/24h — but it could still be noise. Not a profit promise.
+- Cost: ~20% fewer signals. Doesn't change the signal definition, only the pause between trades after a loss — a risk-management overlay, not fiddling with entry logic.
+- **Not yet implemented.** Awaiting the user's explicit approval per the rules.
+
+### Proposal B: Change nothing (a valid option)
+- 6 SLs = the worst streak *expected* ~3×/year per the 9-month backtest. The system is behaving per its distribution.
+- 2 of the 6 losses came from v1.0 stacking, already fixed by one-position-at-a-time in v1.1.
+- The Sep–Oct weakness (PF 0.75) is consistent with the known red Q3; n=31 is too small to declare "edge gone".
+- Let the learning loop (Sunday review) judge with more data.
+
+---
+
+## 5. Overfitting warnings & caveats
+- **6 trades = anecdotal sample.** C1 is the proof: a pattern that looked "obvious" in 6 trades reversed in 265 trades. Never tune from a streak.
+- The C2 gain (+0.08 PF) is thin and could be noise; don't oversell.
+- Backtest feed (Binance PAXGUSDT) ≠ live feed (Twelve Data XAU/USD); boundary-touching signals may differ.
+- No spread/commission/slippage — live PF will be lower than all numbers above.
+- 265 trades is still a medium sample; the edge can vanish for months (proven by Jul & Sep).
 
 ## File
-- `~/workspace/trading-ea/research/fix6sl.py` — rekonstruksi konteks 6 trade (Part A)
-- `~/workspace/trading-ea/research/fix6sl_backtest.py` — harness backtest v1.1 (tervalidasi vs m5_check2: n=529/PF=1.09 ≈ acuan 520/1.10)
-- `~/workspace/trading-ea/research/fix6sl_candidates.py` — uji C1/C2/C3 + diagnostik
-- Laporan ini: `~/workspace/trading-ea/research/fix6sl_RESULTS.md`
-- Data: `/tmp/paxg_m5/` (ephemeral — download ulang dari Binance Vision bila perlu)
+- `~/workspace/trading-ea/research/fix6sl.py` — reconstructing the context of the 6 trades (Part A)
+- `~/workspace/trading-ea/research/fix6sl_backtest.py` — v1.1 backtest harness (validated vs m5_check2: n=529/PF=1.09 ≈ reference 520/1.10)
+- `~/workspace/trading-ea/research/fix6sl_candidates.py` — C1/C2/C3 testing + diagnostics
+- This report: `~/workspace/trading-ea/research/fix6sl_RESULTS.md`
+- Data: `/tmp/paxg_m5/` (ephemeral — re-download from Binance Vision if needed)

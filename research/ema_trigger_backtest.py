@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
-"""ema_trigger_backtest.py — uji TRIGGER = fresh EMA20/50 cross H1 (T1) vs trigger Donchian (v1.2).
+"""ema_trigger_backtest.py — test TRIGGER = fresh EMA20/50 cross on H1 (T1) vs the Donchian trigger (v1.2).
 
-Ide user (approved "gas", 2026-10-07): entry saat EMA20/50 H1 cross, bukan saat
-Donchian breakout — karena di chart 07 Okt cross mendahului sinyal Donchian ~$80.
-Prior jujur: EMA-cross standalone pernah KALAH di semua 6 simbol (riset awal Okt),
-F2 (fresh-cross filter) gagal. Tes ini fair: kalau menang, menang; kalau kalah, kalah.
+User's idea (approved "gas", 2026-10-07): enter on an EMA20/50 H1 cross, not on a
+Donchian breakout — because on the 07 Oct chart the cross preceded the Donchian signal by ~$80.
+Honest priors: the standalone EMA-cross LOST on all 6 symbols (early-Oct research),
+and F2 (fresh-cross filter) failed. This test is fair: if it wins, it wins; if it loses, it loses.
 
-Desain T1 (semua elemen lain IDENTIK v1.2 agar perbandingan fair):
-- Cross: sign(diff H1) berubah pada bar H1 completed (definisi persis F2).
-  Cross up = BUY, cross down = SELL. Cross diketahui saat bar H1 close.
-- Entry: M5 close PERTAMA setelah bar H1 cross tersebut close (tanpa lookahead).
-- Filter H4 (SMA15) tetap dipasang seperti v1.2 (varian utama); varian diagnostik
-  tanpa filter H4 juga dijalankan.
-- Filter EMA-state TIDAK dipakai (redundan dengan trigger cross).
-- Risk management identik: SL 1.5xATR(H1), TP1 1R / TP2 1.5R / TP3 2R (full TP3=2R
-  sebagai r_full; TP1 touch -> SL ke breakeven), one-position-at-a-time,
-  resolusi SL / TP1 / 48h-expiry, prioritas SL intrabar — mesin runner persis run_ema.
-- Transition-only: satu cross = satu sinyal; cross saat posisi aktif = dibuang.
+T1 design (all other elements IDENTICAL to v1.2 for a fair comparison):
+- Cross: sign(diff H1) changes on a completed H1 bar (exact F2 definition).
+  Cross up = BUY, cross down = SELL. A cross is known when the H1 bar closes.
+- Entry: the FIRST M5 close after that H1 cross bar closes (no lookahead).
+- The H4 (SMA15) filter stays on, as in v1.2 (main variant); a diagnostic
+  variant without the H4 filter is also run.
+- The EMA-state filter is NOT used (redundant with the cross trigger).
+- Identical risk management: SL 1.5xATR(H1), TP1 1R / TP2 1.5R / TP3 2R (full TP3=2R
+  as r_full; TP1 touch -> SL to breakeven), one-position-at-a-time,
+  SL / TP1 / 48h-expiry resolution, intrabar SL priority — the runner machinery is exactly run_ema.
+- Transition-only: one cross = one signal; a cross while a position is active is discarded.
 
-READ-ONLY terhadap sistem live. Output: ema_trigger_RESULTS.md
+READ-ONLY on the live system. Output: ema_trigger_RESULTS.md
 """
 import sys, calendar, datetime, bisect
 sys.path.insert(0, "/home/hatch/workspace/trading-ea/research")
@@ -27,10 +27,10 @@ import ema_filter_backtest as F  # run_ema = baseline v1.2 (F1); __main__ guarde
 
 bars, t5, h1, h1t, atr_h1 = B.bars, B.t5, B.h1, B.h1t, B.atr_h1
 
-# --- EMA20/50 + deteksi cross (definisi persis F2 di ema_filter_backtest.py) ---
+# --- EMA20/50 + cross detection (exact F2 definition in ema_filter_backtest.py) ---
 h1c = [b[4] for b in h1]
 diff_h1 = [a - b for a, b in zip(F.ema(h1c, 20), F.ema(h1c, 50))]
-cross_dir = [None] * len(h1)  # "BUY" (cross up) / "SELL" (cross down) pada index bar H1
+cross_dir = [None] * len(h1)  # "BUY" (cross up) / "SELL" (cross down) at H1 bar index
 prev_sign = 0
 for k in range(1, len(h1)):
     s = 1 if diff_h1[k] > 0 else (-1 if diff_h1[k] < 0 else 0)
@@ -39,7 +39,7 @@ for k in range(1, len(h1)):
     if s != 0:
         prev_sign = s
 
-# entry: index bar M5 pertama yang close SETELAH bar H1 cross close
+# entry: index of the first M5 bar that closes AFTER the H1 cross bar closes
 entry_of = {}  # i_m5 -> (dir, j_h1)
 for j, d in enumerate(cross_dir):
     if d is None or j < 61:
@@ -70,7 +70,7 @@ def run_t1(use_h4, t_start, t_end):
         if a <= 0:
             continue
 
-        # resolve runners — mesin persis run_ema + pencatatan ts diagnostik
+        # resolve runners — exact run_ema machinery + diagnostic ts recording
         for r in runners[:]:
             d = r["dir"]; entry = r["entry"]; risk = r["risk"]
             sl = entry if r["tp1_hit"] else r["sl"]
@@ -97,7 +97,7 @@ def run_t1(use_h4, t_start, t_end):
                 trades.append(r)
                 runners.remove(r)
 
-        # live_pos gate — persis run_ema
+        # live_pos gate — exactly like run_ema
         if live_pos is not None:
             d = live_pos["dir"]; sl = live_pos["sl"]; tp1 = live_pos["tp1"]
             if d == "BUY":
@@ -112,7 +112,7 @@ def run_t1(use_h4, t_start, t_end):
                 live_pos = None
                 suppress_until = ts
 
-        # sinyal baru: TRIGGER = EMA cross (bukan Donchian breakout)
+        # new signal: TRIGGER = EMA cross (not Donchian breakout)
         if i in entry_of:
             n_cross_raw += 1
         if live_pos is None and ts >= suppress_until and i in entry_of:
@@ -186,7 +186,7 @@ if __name__ == "__main__":
                   f"avgR={s['avg']:+.2f} totR={s['tot']:+.1f} maxDD={s['mdd']:.1f} "
                   f"| whipsaw(<=12H1)={s['whip_pct']:.0f}% avgTP1={s['avg_tp1_h']:.1f}h avgSL={s['avg_sl_h']:.1f}h",
                   flush=True)
-    # frekuensi cross mentah per periode (diagnostik)
+    # raw cross frequency per period (diagnostic)
     for pname, ps, pe in [("Jan-Oct", JAN, END), ("Sep-Oct", SEP, END)]:
         _, nraw = run_t1(True, ps, pe)
         print(f"cross events {pname}: {nraw}", flush=True)

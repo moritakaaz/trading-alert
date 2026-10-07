@@ -187,7 +187,7 @@ def status_text():
                     pass
     except Exception:
         pass
-    last_sig = "belum ada"
+    last_sig = "none yet"
     try:
         with open(os.path.expanduser(JOURNAL)) as f:
             rows = list(csv.DictReader(f))
@@ -209,27 +209,27 @@ def status_text():
     pos_line = ""
     if at:
         tp1_px = round(at["entry"] + at["tp1_d"] * (1 if at["signal"] == "BUY" else -1), 2)
-        pos_line = f"\n📌 Posisi {at['signal']} @ ~${at['entry']} masih jalan (TP1 ${tp1_px})"
+        pos_line = f"\n📌 {at['signal']} position @ ~${at['entry']} still open (TP1 ${tp1_px})"
     _m = st.get("modal") or {"amount": 600, "currency": "usc"}
     _mu = "USC" if (_m.get("currency") or "usc") == "usc" else "USD"
-    return (f"{emoji} <b>Alert XAUUSD M5: {'AKTIF' if on else 'MATI'}</b>\n"
-            f"💰 Modal: {_m.get('amount')} {_mu} (/set_modal untuk ubah)\n"
-            f"📊 {n_today}x cek hari ini (terakhir {last_poll} WIB)\n"
-            f"🚨 Sinyal terakhir: {esc(last_sig)}{pos_line}")
+    return (f"{emoji} <b>XAUUSD M5 alerts: {'ON' if on else 'OFF'}</b>\n"
+            f"💰 Balance: {_m.get('amount')} {_mu} (/set_modal to change)\n"
+            f"📊 {n_today}x checks today (last {last_poll} WIB)\n"
+            f"🚨 Last signal: {esc(last_sig)}{pos_line}")
 
-HELP = ("🤖 <b>Perintah bot alert XAUUSD</b>\n"
-        "/alert_on — nyalakan alert\n"
-        "/alert_off — matikan alert\n"
-        "/alert_status — status sistem\n"
-        "/cek — status + sinyal terakhir\n"
-        "/chart — chart XAUUSD live + data\n"
-        "/trend — trend H4 & H1 saat ini\n"
-        "/riwayat — 10 sinyal terakhir + hasil\n"
-        "/set_modal — set modal (contoh: /set_modal 600 usc)\n"
-        "/skip_trade — skip sinyal (nggak entry)\n"
-        "/close_trade — tutup manual (sl|tp1|tp2|tp3|be|manual)\n"
-        "/cancel_trade — batalkan sinyal (invalid)\n"
-        "/reset_trade — reset posisi aktif yg tersangkut (darurat)")
+HELP = ("🤖 <b>XAUUSD alert bot commands</b>\n"
+        "/alert_on — turn alerts on\n"
+        "/alert_off — turn alerts off\n"
+        "/alert_status — system status\n"
+        "/cek — status + last signal\n"
+        "/chart — live XAUUSD chart + data\n"
+        "/trend — current H4 & H1 trend\n"
+        "/riwayat — last 10 signals + results\n"
+        "/set_modal — set balance (e.g. /set_modal 600 usc)\n"
+        "/skip_trade — skip signal (no entry)\n"
+        "/close_trade — close manually (sl|tp1|tp2|tp3|be|manual)\n"
+        "/cancel_trade — cancel signal (invalid)\n"
+        "/reset_trade — reset a stuck active position (emergency)")
 
 def history_text():
     """Last 10 journaled signals with outcomes, newest first. Times in WIB."""
@@ -237,9 +237,9 @@ def history_text():
         with open(os.path.expanduser(JOURNAL)) as f:
             rows = list(csv.DictReader(f))
     except Exception:
-        return "❌ Belum ada riwayat."
+        return "❌ No history yet."
     if not rows:
-        return "❌ Belum ada riwayat."
+        return "❌ No history yet."
     WIB = datetime.timezone(datetime.timedelta(hours=7))
     def wib(iso):
         try:
@@ -248,7 +248,7 @@ def history_text():
             return dt.astimezone(WIB).strftime("%d %b %H:%M")
         except Exception:
             return (iso or "")[:16]
-    lines = ["📜 <b>10 sinyal terakhir</b>", ""]
+    lines = ["📜 <b>Last 10 signals</b>", ""]
     for r in rows[-10:][::-1]:
         sig_emoji = "🟢" if r["signal"] == "BUY" else "🔴"
         try:
@@ -303,10 +303,10 @@ def trend_text():
     try:
         h1 = td_ohlc("1h", 80)
     except Exception as ex:
-        return f"❌ Gagal ambil data harga: {esc(str(ex)[:60])}"
+        return f"❌ Failed to fetch price data: {esc(str(ex)[:60])}"
     closes = [b[4] for b in h1]
     if len(closes) < 60:
-        return "❌ Data H1 kurang untuk hitung trend."
+        return "❌ Not enough H1 data to compute trend."
     # H4: resample 4x H1 -> H4 closes
     h4 = []
     for i in range(0, len(h1) - 3, 4):
@@ -321,11 +321,11 @@ def trend_text():
     e4 = "🟢" if h4_trend == "BULLISH" else "🔴"
     e1 = "🟢" if h1_trend == "BULLISH" else "🔴"
     sig_ok = "BUY" if h4_trend == "BULLISH" else "SELL"
-    return (f"📊 <b>Trend XAUUSD saat ini</b>\n\n"
+    return (f"📊 <b>Current XAUUSD trend</b>\n\n"
             f"{e4} <b>H4: {h4_trend}</b> (SMA15 ${h4_sma:,.0f})\n"
-            f"   → filter sinyal: hanya <b>{sig_ok}</b> yang lolos\n\n"
+            f"   → signal filter: only <b>{sig_ok}</b> passes\n\n"
             f"{e1} H1: {h1_trend} (SMA20 ${h1_sma:,.0f})\n\n"
-            f"💰 Harga: <b>${now_px:,.2f}</b>\n"
+            f"💰 Price: <b>${now_px:,.2f}</b>\n"
             f"[strat v1.1]")
 
 def last_signal():
@@ -348,17 +348,17 @@ def handle_chart():
         m5 = td_ohlc("5min", 80)
         h1 = td_ohlc("1h", 70)
     except Exception:
-        return None, "❌ Gagal ambil data harga, coba lagi sebentar."
+        return None, "❌ Failed to fetch price data, try again shortly."
     now_ts = int(time.time())
     m5b = now_ts - (now_ts % 300)
     closed5 = [b for b in m5 if b[0] < m5b]
     if len(closed5) < 3:
-        return None, "❌ Data M5 kurang."
+        return None, "❌ Not enough M5 data."
     sig_bar = closed5[-1]
     hour_start = sig_bar[0] - (sig_bar[0] % 3600)
     h1c = [b for b in h1 if b[0] < hour_start]
     if len(h1c) < 62:
-        return None, "❌ Data H1 kurang."
+        return None, "❌ Not enough H1 data."
     win = h1c[-48:]
     upper = max(b[2] for b in win)
     lower = min(b[3] for b in win)
@@ -378,16 +378,16 @@ def handle_chart():
     bars_in = [{"t": b[0], "o": b[1], "h": b[2], "l": b[3], "c": b[4]}
                for b in closed5[-72:]]
     du, dl = int(round(upper - cur)), int(round(cur - lower))
-    donchian_cap = (f"🔼 Upper ${int(round(upper))} (${du} lagi) | "
-                    f"🔽 Lower ${int(round(lower))} (${dl} lagi)\n"
-                    f"📏 ATR H1 ${int(round(a1))}")
+    donchian_cap = (f"🔼 Upper ${int(round(upper))} (${du} away) | "
+                    f"🔽 Lower ${int(round(lower))} (${dl} away)\n"
+                    f"📏 H1 ATR ${int(round(a1))}")
     def signal_age(iso):
         try:
             dt = datetime.datetime.strptime(
                 (iso or "")[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=datetime.timezone.utc)
             secs = max(0, int(time.time()) - int(dt.timestamp()))
             h, rem = divmod(secs, 3600); m = rem // 60
-            return f"{h}j {m}m lalu" if h else f"{m}m lalu"
+            return f"{h}h {m}m ago" if h else f"{m}m ago"
         except Exception:
             return ""
     if row:
@@ -398,7 +398,7 @@ def handle_chart():
             s_d = float(row["sl_d"]); t1d = float(row["tp1_d"])
             t2d = float(row["tp2_d"]); t3d = float(row["tp3_d"])
         except (ValueError, KeyError):
-            return None, "❌ Data sinyal rusak."
+            return None, "❌ Signal data corrupted."
         is_open = row["status"] == "open"
         try:
             sig_epoch = int(datetime.datetime.strptime(
@@ -414,10 +414,10 @@ def handle_chart():
                     "sig_t": sig_epoch}
         sl_px = int(round(e - m * s_d)); tp1_px = int(round(e + m * t1d))
         age = signal_age(row.get("alert_time_utc"))
-        age_s = f" ⏳ sinyal {age}" if age else ""
+        age_s = f" ⏳ signal {age}" if age else ""
         if is_open:
             pnl = int(round((cur - e) * m))
-            cap = (f"📊 <b>{sig} @ ${int(round(e))}</b> — sekarang ${cur} ({pnl:+d}){age_s}\n"
+            cap = (f"📊 <b>{sig} @ ${int(round(e))}</b> — now ${cur} ({pnl:+d}){age_s}\n"
                    f"🛑 SL ${sl_px} | 🎯 TP1 ${tp1_px}\n"
                    f"{donchian_cap}")
         else:
@@ -429,7 +429,7 @@ def handle_chart():
             except ValueError:
                 pass
             chart_in["hist_label"] = f"→ {oc}{rtag}" if oc else ""
-            cap = (f"📊 <b>Sinyal terakhir: {sig} @ ${int(round(e))}</b> → {oc}{rtag}\n"
+            cap = (f"📊 <b>Last signal: {sig} @ ${int(round(e))}</b> → {oc}{rtag}\n"
                    f"{donchian_cap}")
     else:
         chart_in = {"bars": bars_in, "upper": upper, "lower": lower,
@@ -444,7 +444,7 @@ def handle_chart():
                            capture_output=True, text=True, timeout=60)
         os.remove(tmp_in)
         if not os.path.exists(chart_path):
-            return None, "❌ Gagal render chart."
+            return None, "❌ Failed to render chart."
         # keep only the 20 newest now_*.png (entry charts are pruned separately)
         import glob as _glob
         files = sorted(_glob.glob(os.path.join(chart_dir, "now_*.png")),
@@ -452,7 +452,7 @@ def handle_chart():
         for old in files[:-20]:
             os.remove(old)
     except Exception:
-        return None, "❌ Gagal render chart."
+        return None, "❌ Failed to render chart."
     return chart_path, cap
 
 def handle_callback(data):
@@ -470,14 +470,14 @@ def handle_callback(data):
         save_state({"paused_until": int(time.time()) + 3600,
                     "alert_on": True})
         tg_send(chat_id,
-                "⏸️ <b>Alert di-pause 1 jam.</b>\n"
-                "Sinyal entry berhenti, heartbeat tetap jalan.\n"
-                "Kirim /alert_on untuk lanjutkan lebih cepat.")
+                "⏸️ <b>Alerts paused for 1 hour.</b>\n"
+                "Entry signals paused, heartbeat still running.\n"
+                "Send /alert_on to resume sooner.")
     elif data == "alert_off":
         save_state({"alert_on": False, "paused_until": 0})
         tg_send(chat_id,
-                "🔴 <b>Alert XAUUSD dimatikan.</b>\n"
-                "Kirim /alert_on untuk menyalakan lagi.")
+                "🔴 <b>XAUUSD alerts turned off.</b>\n"
+                "Send /alert_on to turn them on again.")
 
 def handle(text):
     cmd = text.strip().split()[0].split("@")[0].lower()
@@ -490,36 +490,36 @@ def handle(text):
             st0 = load_state()
             m0 = st0.get("modal") or {"amount": 600, "currency": "usc"}
             u0 = "USC" if (m0.get("currency") or "usc") == "usc" else "USD"
-            return (f"💰 Modal saat ini: <b>{m0.get('amount')} {u0}</b>\n"
-                    f"Pakai: /set_modal &lt;jumlah&gt; [usd|usc]\n"
-                    f"Contoh: /set_modal 600 usc")
+            return (f"💰 Current balance: <b>{m0.get('amount')} {u0}</b>\n"
+                    f"Usage: /set_modal &lt;amount&gt; [usd|usc]\n"
+                    f"Example: /set_modal 600 usc")
         try:
             amount = float(parts[1])
         except ValueError:
-            return "❌ Jumlah harus angka. Contoh: /set_modal 600 usc"
+            return "❌ Amount must be a number. Example: /set_modal 600 usc"
         if amount <= 0:
-            return "❌ Jumlah harus lebih dari 0."
+            return "❌ Amount must be greater than 0."
         st0 = load_state()
         modal = st0.get("modal") or {"amount": 600, "currency": "usc"}
         if len(parts) > 2:
             cur = parts[2].lower()
             if cur not in ("usd", "usc"):
-                return "❌ Mata uang cuma: usd atau usc."
+                return "❌ Currency must be: usd or usc."
             modal["currency"] = cur
         modal["amount"] = int(amount) if amount == int(amount) else round(amount, 2)
         save_state({"modal": modal})
         unit = "USC" if modal["currency"] == "usc" else "USD"
-        return (f"✅ <b>Modal diset: {modal['amount']} {unit}</b>\n"
-                f"Risiko % di alert & notif sekarang pakai angka ini.\n"
-                f"Update lagi via /set_modal tiap deposit/tarik dana.")
+        return (f"✅ <b>Balance set: {modal['amount']} {unit}</b>\n"
+                f"Risk % in alerts & notifications now uses this figure.\n"
+                f"Update again via /set_modal after each deposit/withdrawal.")
     if cmd == "/alert_on":
         save_state({"alert_on": True, "paused_until": 0})
-        return ("🟢 <b>Alert XAUUSD dinyalakan.</b>\n"
-                "Sinyal BUY/SELL + heartbeat tiap 5 mnt aktif.")
+        return ("🟢 <b>XAUUSD alerts turned on.</b>\n"
+                "BUY/SELL signals + 5-min heartbeat active.")
     if cmd == "/alert_off":
         save_state({"alert_on": False})
-        return ("🔴 <b>Alert XAUUSD dimatikan.</b>\n"
-                "Kirim /alert_on untuk menyalakan lagi.")
+        return ("🔴 <b>XAUUSD alerts turned off.</b>\n"
+                "Send /alert_on to turn them on again.")
     if cmd in ("/alert_status", "/cek"):
         return status_text()
     if cmd == "/riwayat":
@@ -544,13 +544,13 @@ def handle(text):
         except Exception:
             pass
         if not at and not open_rows:
-            return ("ℹ️ Tidak ada posisi aktif.\n"
-                    "Tidak ada yang perlu di-skip/close/cancel.")
+            return ("ℹ️ No active position.\n"
+                    "Nothing to skip/close/cancel.")
         outcome_map = {
             "/skip_trade": ("skipped", "skipped", "0",
-                            "Trade di-skip — tidak entry."),
+                            "Trade skipped — no entry."),
             "/cancel_trade": ("cancelled", "cancelled", "0",
-                              "Trade di-cancel — sinyal dianggap invalid."),
+                              "Trade cancelled — signal marked invalid."),
         }
         if cmd == "/close_trade":
             parts = text.strip().split()
@@ -564,11 +564,11 @@ def handle(text):
                     "be": ("closed", "TP1+BE", "0"),
                     "manual": ("closed", "manual", "0")}
             if o not in omap:
-                return ("❌ Outcome harus: sl | tp1 | tp2 | tp3 | be | manual\n"
-                        "Contoh: /close_trade tp1")
+                return ("❌ Outcome must be: sl | tp1 | tp2 | tp3 | be | manual\n"
+                        "Example: /close_trade tp1")
             _st, _oc, _rm = omap[o]
             outcome_map[cmd] = (_st, _oc, _rm,
-                                f"Trade ditutup manual ({o}).")
+                                f"Trade closed manually ({o}).")
         status, outcome, rmult, desc = outcome_map[cmd]
         # update journal under lock
         def _lifecycle_update(rows):
@@ -586,11 +586,11 @@ def handle(text):
             log("xauusd-tg-cmd", f"lifecycle-journal-fail:{str(ex)[:40]}")
         save_state({"active_trade": None})
         sig_txt = f"{at.get('signal')} @ ${at.get('entry')}" if at else \
-            f"{len(open_rows)} jurnal open"
+            f"{len(open_rows)} journal open"
         log("xauusd-tg-cmd", f"{cmd}:{sig_txt}")
         return (f"✅ <b>{desc}</b>\n"
-                f"Posisi: {sig_txt}\n"
-                f"Sistem lanjut memantau sinyal baru.")
+                f"Position: {sig_txt}\n"
+                f"Monitoring new signals again.")
     # (removed duplicate /alert_status,/cek,/riwayat handlers — 2026-10-05)
     if cmd == "/reset_trade":
         # Emergency reset: clear a stuck active_trade (e.g. state desync
@@ -599,15 +599,15 @@ def handle(text):
         st0 = load_state()
         at = st0.get("active_trade")
         if not at:
-            return ("ℹ️ Tidak ada posisi aktif yang perlu di-reset.\n"
-                    "Sistem sudah memantau sinyal baru seperti biasa.")
+            return ("ℹ️ No active position to reset.\n"
+                    "The system is already monitoring new signals.")
         save_state({"active_trade": None})
         log("xauusd-tg-cmd", f"reset-trade:{at.get('signal')}@{at.get('entry')}")
-        return (f"🔄 <b>active_trade di-reset.</b>\n"
-                f"Posisi {at.get('signal')} @ ~${at.get('entry')} dihapus dari pantauan.\n"
-                f"Sistem kembali memantau sinyal baru.")
+        return (f"🔄 <b>active_trade reset.</b>\n"
+                f"Position {at.get('signal')} @ ~${at.get('entry')} removed from tracking.\n"
+                f"The system is monitoring new signals again.")
     if cmd.startswith("/"):
-        return "❓ Perintah tidak dikenal.\n" + HELP
+        return "❓ Unknown command.\n" + HELP
     return None
 
 try:

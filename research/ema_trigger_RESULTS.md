@@ -1,80 +1,54 @@
-# Uji TRIGGER = EMA20/50 Cross H1 (T1) vs Trigger Donchian v1.2 — Hasil Backtest (2026-10-07)
+# Testing TRIGGER = EMA20/50 Cross H1 (T1) vs Donchian Trigger v1.2 — Backtest Results (2026-10-07)
 
-**Pertanyaan user:** "ketika EMA-nya udah ngecross itu ngasih alert entry (buy/sell)" — karena di chart
-07 Okt 2026 cross H1 (sekitar $4160) mendahului sinyal Donchian SELL @$4082 sekitar ~$80.
-User approved "gas", dites fair.
-**Prior jujur:** EMA-cross sebagai trigger standalone pernah KALAH di semua 6 simbol (riset awal
-Okt 2026); F2 (fresh-cross sebagai filter) gagal (PF 0.82). Ekspektasi: kemungkinan besar gagal —
-tapi tes tetap dijalankan fair.
+**User's question:** "when the EMA crosses it should give an entry alert (buy/sell)" — because on the 07 Oct 2026 chart the H1 cross (around $4160) preceded the Donchian SELL signal @$4082 by about ~$80. User approved "gas", tested fairly.
+**Honest prior:** EMA-cross as a standalone trigger already LOST on all 6 symbols (early Oct 2026 research); F2 (fresh-cross as a filter) failed (PF 0.82). Expectation: likely to fail — but the test was still run fairly.
 
-**Metode:** harness `ema_trigger_backtest.py` (mesin runner, live_pos gate, resolusi
-SL/TP1/48h-expiry, prioritas SL intrabar — persis `run_ema` di `ema_filter_backtest.py`).
-Data Binance PAXGUSDT M5 Jan–Okt 2026 (proxy XAUUSD), download ulang dari Binance Vision
-(monthly Jan–Sep + daily 01–06 Okt; file daily 07 Okt belum terbit saat tes).
+**Method:** harness `ema_trigger_backtest.py` (runner engine, live_pos gate, SL/TP1/48h-expiry resolution, intrabar SL priority — exactly `run_ema` in `ema_filter_backtest.py`). Binance PAXGUSDT M5 Jan–Oct 2026 data (XAUUSD proxy), re-downloaded from Binance Vision (monthly Jan–Sep + daily 01–06 Oct; the 07 Oct daily file was not yet published at test time).
 
-**Definisi T1 yang presisi (tanpa lookahead):**
-- Cross terdeteksi pada bar H1 completed `j`: `sign(EMA20−EMA50)` berubah (definisi persis F2;
-  butuh `prev_sign != 0`, jadi cross pertama dari warmup tidak dihitung).
-- Entry = close bar M5 PERTAMA dengan `ts >= h1t[j]+3600` (momen cross diketahui).
-- Cross up → BUY, cross down → SELL. Satu cross = satu sinyal; cross saat posisi aktif = dibuang
-  (sama seperti sinyal Donchian saat posisi aktif di v1.2).
-- Risk management IDENTIK v1.2: SL 1.5×ATR(H1) (@bar cross), TP1 1R / TP2 1.5R / TP3 2R,
-  TP1-touch → SL ke breakeven, 48h expiry, one-position-at-a-time.
-- Varian utama T1+H4 (filter H4 SMA15 seperti v1.2, dihitung pada bar cross `jc`);
-  varian diagnostik T1 tanpa filter H4. Filter EMA-state TIDAK dipakai (redundan dengan trigger).
+**Precise T1 definition (no lookahead):**
+- Cross detected on completed H1 bar `j`: `sign(EMA20−EMA50)` changes (exactly the F2 definition; requires `prev_sign != 0`, so the first cross from warmup is not counted).
+- Entry = close of the FIRST M5 bar with `ts >= h1t[j]+3600` (the moment the cross is known).
+- Cross up → BUY, cross down → SELL. One cross = one signal; a cross while a position is active = discarded (same as a Donchian signal while a position is active in v1.2).
+- Risk management IDENTICAL to v1.2: SL 1.5×ATR(H1) (@cross bar), TP1 1R / TP2 1.5R / TP3 2R, TP1-touch → SL to breakeven, 48h expiry, one-position-at-a-time.
+- Main variant T1+H4 (H4 SMA15 filter like v1.2, computed on cross bar `jc`); diagnostic variant T1 without H4 filter. The EMA-state filter is NOT used (redundant with the trigger).
 
-**Validasi:** baseline v1.2 di script ini (n=238, PF=1.38, totR=+42.2, maxDD=15.3) match PERSIS
-dengan `ema_filter_RESULTS.md` — angka antar-varian comparable.
+**Validation:** the v1.2 baseline in this script (n=238, PF=1.38, totR=+42.2, maxDD=15.3) matches EXACTLY with `ema_filter_RESULTS.md` — numbers are comparable across variants.
 
-## 1. Hasil utama
+## 1. Main results
 
-| Varian | Jan–Okt n | win% | PF | avgR | totR | maxDD | Sep–Okt n | PF | totR |
+| Variant | Jan–Oct n | win% | PF | avgR | totR | maxDD | Sep–Oct n | PF | totR |
 |---|---|---|---|---|---|---|---|---|---|
 | v1.2 baseline (Donchian trigger) | 238 | 33.6 | **1.38** | +0.18 | **+42.2** | 15.3 | 27 | 0.86 | -2.0 |
 | **T1: EMA-cross trigger +H4** | 92 | 25.0 | **0.86** | -0.07 | **-6.4** | 12.1 | 17 | 0.93 | -0.6 |
 | T1: EMA-cross trigger no-H4 | 92 | 21.7 | 0.68 | -0.17 | -15.4 | 19.7 | 17 | 0.60 | -3.6 |
 
-- **T1 GAGAL DECISIF.** PF 0.86 (< 1.0 = rugi), totR −6.4R vs +42.2R milik v1.2. Tanpa filter H4
-  lebih parah (PF 0.68). Di data terbaru Sep–Okt pun tidak lebih baik dari v1.2 secara bermakna
-  (0.93 vs 0.86, n=17 — noise di sampel kecil).
-- Frekuensi: 99 cross H1 dalam 9 bulan (98 event dalam periode Jan–Okt) → 92 trade diambil
-  (6 dibuang one-position gate; filter H4 tidak memblokir satu pun — cross H1 praktis selalu
-  selaras H4). v1.2 memberi 238 sinyal: T1 ~60% lebih jarang AND jauh lebih jelek.
+- **T1 FAILS DECISIVELY.** PF 0.86 (< 1.0 = losing), totR −6.4R vs v1.2's +42.2R. Without the H4 filter it's worse (PF 0.68). Even in the latest Sep–Oct data it's not meaningfully better than v1.2 (0.93 vs 0.86, n=17 — noise in a small sample).
+- Frequency: 99 H1 crosses in 9 months (98 events in the Jan–Oct period) → 92 trades taken (6 discarded by the one-position gate; the H4 filter didn't block a single one — an H1 cross is practically always aligned with H4). v1.2 gives 238 signals: T1 is ~60% rarer AND far worse.
 
-## 2. Diagnostik: kenapa gagal
+## 2. Diagnostic: why it failed
 
-| Metrik (T1+H4, Jan–Okt) | Angka |
+| Metric (T1+H4, Jan–Oct) | Value |
 |---|---|
-| % SL yang kena dalam ≤12 bar H1 setelah entry (whipsaw) | **87%** |
-| Rata-rata bar H1 entry → SL | 6.1 jam |
-| Rata-rata bar H1 entry → TP1 touch | 10.1 jam |
+| % of SLs hit within ≤12 H1 bars after entry (whipsaw) | **87%** |
+| Average H1 bars entry → SL | 6.1 hours |
+| Average H1 bars entry → TP1 touch | 10.1 hours |
 
-- **Mekanisme kegagalan = whipsaw.** 87% dari SL kena dalam 12 jam pertama. Cross EMA adalah
-  indikator lagging: saat dia cross, harga sudah bergerak jauh — dan sering langsung berbalik.
-- **Contoh konkret 02–03 Okt** (5 trade T1 terakhir di data): SELL −1R → BUY −1R (3 jam
-  kemudian) → SELL −1R (2 jam kemudian!) → BUY −1R → SELL +0.1R. **4 SL beruntun dalam ~2 hari**
-  karena cross flip-flop bolak-balik. Inilah yang tidak terlihat di satu chart cantik.
-- Ironi yang wajib dicatat: chart 07 Okt yang memicu ide ini justru menunjukkan cross DOWN
-  yang "sempurna" — tapi data 9 bulan menunjukkan cross semacam itu lebih sering jebakan
-  daripada berkah. Satu chart = anekdot; 99 cross = data.
+- **Failure mechanism = whipsaw.** 87% of SLs are hit within the first 12 hours. An EMA cross is a lagging indicator: by the time it crosses, price has already moved far — and often immediately reverses.
+- **Concrete example 02–03 Oct** (last 5 T1 trades in the data): SELL −1R → BUY −1R (3 hours later) → SELL −1R (2 hours later!) → BUY −1R → SELL +0.1R. **4 consecutive SLs in ~2 days** because the cross flip-flopped back and forth. This is what one pretty chart doesn't show.
+- Irony worth noting: the 07 Oct chart that sparked this idea shows a "perfect" DOWN cross — but 9 months of data show such crosses are more often traps than blessings. One chart = anecdote; 99 crosses = data.
 
-## 3. Kesimpulan jujur & rekomendasi
+## 3. Honest conclusions & recommendation
 
-**JANGAN ganti trigger ke EMA cross.** Hasilnya bukan "netral tapi menarik" — melainkan rugi
-sistematis (PF 0.86, −6.4R). Ini konfirmasi ketiga setelah (a) EMA-cross standalone kalah di
-6 simbol dan (b) F2 gagal: **EMA cross tidak bisa dipakai sebagai trigger entry.**
+**DO NOT switch the trigger to EMA cross.** The result isn't "neutral but interesting" — it's systematic loss (PF 0.86, −6.4R). This is the third confirmation after (a) standalone EMA-cross losing on 6 symbols and (b) F2 failing: **EMA cross cannot be used as an entry trigger.**
 
-**Rekomendasi: tetap di v1.2 (Donchian trigger + filter H4 + filter EMA-state H1) apa adanya.**
-EMA20/50 tetap dipakai — tapi sebagai FILTER (terbukti +0.15 PF), bukan sebagai TRIGGER.
-Posisi EMA dalam sistem sudah benar: Donchian yang cari momen breakout, EMA yang menilai
-apakah breakout itu searah trend menengah.
+**Recommendation: stay on v1.2 (Donchian trigger + H4 filter + EMA-state H1 filter) as-is.** EMA20/50 stays in use — but as a FILTER (proven +0.15 PF), not as a TRIGGER. EMA's place in the system is correct: Donchian finds the breakout moment, EMA judges whether the breakout is aligned with the medium-term trend.
 
-**Skeptisisme yang wajib dicatat:**
-- Tanpa spread/komisi/slippage — PF live akan lebih rendah dari semua angka di atas.
-- Feed backtest (Binance) ≠ feed live (Twelve Data); 92 trade T1 = sampel kecil-sedang.
-- Cross terakhir di data (BUY @ 07 Okt 01:00 WIB) belum ada di hasil — datanya mentok 06 Okt.
+**Mandatory skepticism notes:**
+- No spread/commission/slippage — live PF will be lower than all numbers above.
+- Backtest feed (Binance) ≠ live feed (Twelve Data); 92 T1 trades = small-to-medium sample.
+- The last cross in the data (BUY @ 07 Oct 01:00 WIB) is not in the results — the data ends at 06 Oct.
 
 ## File
-- `~/workspace/trading-ea/research/ema_trigger_backtest.py` — script uji T1
-- Laporan ini: `~/workspace/trading-ea/research/ema_trigger_RESULTS.md`
-- Data: `/tmp/paxg_m5/` (ephemeral — download ulang dari Binance Vision bila perlu)
+- `~/workspace/trading-ea/research/ema_trigger_backtest.py` — T1 test script
+- This report: `~/workspace/trading-ea/research/ema_trigger_RESULTS.md`
+- Data: `/tmp/paxg_m5/` (ephemeral — re-download from Binance Vision if needed)

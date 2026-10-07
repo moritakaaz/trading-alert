@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""fix6sl_backtest.py — re-backtest strategi XAUUSD M5 v1.1 + kandidat perbaikan.
-Replikasi logika live: Donchian(48) H1 completed, trigger M5 close, SL 1.5xATR(H1),
+"""fix6sl_backtest.py — re-backtest of the XAUUSD M5 v1.1 strategy + fix candidates.
+Replicates the live logic: Donchian(48) on completed H1, M5-close trigger, SL 1.5xATR(H1),
 transition-only, H4 filter (chunk-4 quirk), one-position-at-a-time (SL/TP1/48h).
-live_pos mengatur kapan sinyal baru boleh fire; runner menghitung R_full terpisah.
-READ-ONLY terhadap sistem live.
+live_pos gates when new signals may fire; the runner computes R_full separately.
+READ-ONLY on the live system.
 """
 import csv, glob, zipfile, datetime, bisect, sys, calendar
 

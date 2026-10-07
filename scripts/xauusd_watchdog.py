@@ -98,9 +98,9 @@ def main():
     if state_missing:
         last_wd = st.get("watchdog_last_alert", 0)
         if now - last_wd > 3600:
-            tg_send("⚠️ <b>Watchdog: state file hilang/korup</b>\n\n"
-                    "File <code>xauusd_entry_m5.json</code> tidak bisa dibaca. "
-                    "Alert script mungkin jalan tanpa watchdog. Cek segera.")
+            tg_send("⚠️ <b>Watchdog: state file missing/corrupt</b>\n\n"
+                    "File <code>xauusd_entry_m5.json</code> cannot be read. "
+                    "The alert script may be running without the watchdog. Check immediately.")
             log("alert:state-missing")
         else:
             log("state-missing:already-alerted")
@@ -119,8 +119,8 @@ def main():
         if now - last_wd > 3600:
             tg_send(
                 f"⚠️ <b>SYSTEM DOWN?</b>\n"
-                f"Heartbeat terakhir {mins} menit lalu.\n"
-                f"Hook xauusd-entry-m5 mungkin mati. Cek /alert_status.")
+                f"Last heartbeat {mins} minutes ago.\n"
+                f"The xauusd-entry-m5 hook may be dead. Check /alert_status.")
             # atomic write via tempfile + replace (lock-free readers
             # never see partial); lock on separate .lock file
             import tempfile
@@ -176,8 +176,8 @@ def main():
             if now - last_wd > 3600:
                 tg_send(
                     f"⚠️ <b>PRICE FEED DOWN</b>\n"
-                    f"{trailing}x gagal ambil harga berturut-turut.\n"
-                    f"Cek koneksi / API quota.")
+                    f"{trailing} consecutive price fetch failures.\n"
+                    f"Check connection / API quota.")
                 try:
                     with open(STATE, "r+") as f:
                         fcntl.flock(f, fcntl.LOCK_EX)
@@ -207,8 +207,8 @@ def main():
             if now - last_wd > 3600:
                 tg_send(
                     f"⚠️ <b>COMMAND HANDLER DOWN?</b>\n"
-                    f"Tidak ada aktivitas {int((now - cmd_mtime) / 60)} menit.\n"
-                    f"Command Telegram mungkin tidak direspons.")
+                    f"No activity for {int((now - cmd_mtime) / 60)} minutes.\n"
+                    f"Telegram commands may not be responding.")
                 try:
                     with open(STATE, "r+") as f:
                         fcntl.flock(f, fcntl.LOCK_EX)

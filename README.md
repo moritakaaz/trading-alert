@@ -1,83 +1,85 @@
 # XAUUSD Telegram Manual-Alert System
 
-> ⚠️ **Bukan saran finansial.** Proyek eksperimen — dana yang dipakai adalah "uang belajar"
-> (akun cent kecil). Jangan pakai untuk live trading tanpa paham risikonya.
+> ⚠️ **Not financial advice.** An experimental project — the funds used are
+> "learning money" (a small cent account). Do not use for live trading
+> without understanding the risks.
 
-Sistem alert entry **XAUUSD (M5)** yang mengirim sinyal ke Telegram: breakout
-Donchian dengan filter trend, lengkap dengan jurnal otomatis, chart entry,
-monitoring posisi (TP1/TP2/TP3 + breakeven), dan review performa mingguan.
+An **XAUUSD (M5)** entry-alert system that pushes signals to Telegram:
+Donchian breakouts with trend filters, automatic journaling, entry charts,
+position monitoring (TP1/TP2/TP3 + breakeven), and weekly performance reviews.
 
-## Strategi (v1.3, live)
+## Strategy (v1.3, live)
 
-| Komponen | Detail |
+| Component | Detail |
 |---|---|
-| Trigger | Breakout Donchian(48) di bar H1 completed, dievaluasi tiap close bar M5 |
+| Trigger | Donchian(48) breakout on completed H1 bars, evaluated on each M5 close |
 | Stop loss | 1.5 × ATR(14) H1 |
-| Take profit | TP1 1R → SL ke breakeven, TP2 1.5R, TP3 2R (runner) |
-| Filter trend H4 | Hard filter — sinyal harus searah trend H4 (SMA15) |
-| Filter EMA 20/50 | Hard filter — BUY hanya jika EMA20 > EMA50 di H1 (dan sebaliknya) |
-| Manajemen | Satu posisi dalam satu waktu; tidak ada stacking sinyal |
+| Take profit | TP1 1R → SL to breakeven, TP2 1.5R, TP3 2R (runner) |
+| H4 trend filter | Hard filter — signals must align with the H4 trend (SMA15) |
+| EMA 20/50 filter | Hard filter — BUY only if EMA20 > EMA50 on H1 (and vice versa) |
+| Management | One position at a time; no signal stacking |
 
-**Hasil backtest jujur** (9 bulan, Jan–Okt 2026, 265 trade, data PAXGUSDT M5):
+**Honest backtest results** (9 months, Jan–Oct 2026, 265 trades, PAXGUSDT M5 data):
 
-| Metrik | Angka |
+| Metric | Value |
 |---|---|
 | Profit Factor | **1.38** |
 | Win rate | 33.6% |
-| Rata-rata / trade | +0.18R |
+| Average / trade | +0.18R |
 | Max drawdown | 15.3R |
 
-Catatan jujur: Q3 2026 strateginya merah. Belum termasuk spread/komisi/slippage —
-hasil live **akan lebih rendah**. 265 trade = sampel sedang. Angka ini bukan janji.
+Honest notes: Q3 2026 was a losing quarter. Excludes spread/commission/slippage —
+live results **will be worse**. 265 trades is a medium sample. These numbers
+are not a promise.
 
-## Arsitektur
+## Architecture
 
 ```
 scripts/
-├── xauusd_entry_m5.sh    # Mesin utama: polling 5 menit, deteksi sinyal, kirim alert
-├── xauusd_tg_cmd.sh      # Command handler Telegram (/cek, /chart, /riwayat, /trend, ...)
-├── make_chart.py         # Render chart entry (matplotlib): Donchian + level SL/TP
-├── entry_scoreboard.py   # Learning loop: nilai hasil tiap sinyal, review mingguan
-├── xauusd_watchdog.py    # Dead man's switch: pastikan sistem tetap hidup
-└── send_tg.py            # Pengirim Telegram (Bot API langsung)
+├── xauusd_entry_m5.sh    # Core engine: 5-min polling, signal detection, alerts
+├── xauusd_tg_cmd.sh      # Telegram command handler (/check, /chart, /history, ...)
+├── make_chart.py         # Entry chart renderer (matplotlib): Donchian + SL/TP levels
+├── entry_scoreboard.py   # Learning loop: scores every signal, weekly review
+├── xauusd_watchdog.py    # Dead man's switch: keeps the system alive
+└── send_tg.py            # Telegram sender (direct Bot API)
 
 data/
-├── xauusd_ohlc.py        # Feed harga XAU/USD (Twelve Data, fallback Kraken PAXGUSD)
-├── forex_news.py         # Headline berita forex (Finnhub) — warning keyword
-└── release_calendar.py   # Kalender ekonomi: NFP/CPI/PPI/GDP (FRED)
+├── xauusd_ohlc.py        # XAU/USD price feed (Twelve Data, Kraken PAXGUSD fallback)
+├── forex_news.py         # Forex news headlines (Finnhub) — keyword warnings
+└── release_calendar.py   # Economic calendar: NFP/CPI/PPI/GDP (FRED)
 
-research/                 # Backtest + laporan hasil (yang gagal juga didokumentasikan)
+research/                 # Backtests + result reports (failures documented too)
 ```
 
-**Yang sudah dites dan DITOLAK** (biar nggak diulang): EMA-cross sebagai trigger,
-filter sesi, SL 2.0×ATR, TP1 0.75R, filter breakout-depth, filter volatilitas,
-EMA di M5/M15 sebagai filter, cooldown pasca-SL. Lihat `research/*_RESULTS.md`.
+**Tested and REJECTED** (so you don't repeat them): EMA-cross as entry trigger,
+session filter, 2.0×ATR stop loss, 0.75R TP1, breakout-depth filter, volatility
+filter, M5/M15 EMA as filters, post-SL cooldown. See `research/*_RESULTS.md`.
 
-## Instalasi
+## Installation
 
 ```bash
 git clone <repo-url>
 cd xauusd-telegram-alert
 cp .env.example .env
-# isi TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TWELVE_DATA_API_KEY di .env
+# fill in TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TWELVE_DATA_API_KEY in .env
 ```
 
-1. Buat bot via [@BotFather](https://t.me/BotFather), catat token dan chat ID.
-2. Daftar API key gratis di [Twelve Data](https://twelvedata.com) (feed utama).
-   Opsional: [Finnhub](https://finnhub.io) (berita), [FRED](https://fred.stlouisfed.org) (kalender).
-3. Sesuaikan path state/log di script dengan environment kamu
-   (default mengacu ke `~/hooks/state/` dan `~/hooks/logs/`).
-4. Jalankan `scripts/xauusd_entry_m5.sh` tiap 5 menit via cron/systemd.
+1. Create a bot via [@BotFather](https://t.me/BotFather), note the token and your chat ID.
+2. Get a free API key from [Twelve Data](https://twelvedata.com) (primary feed).
+   Optional: [Finnhub](https://finnhub.io) (news), [FRED](https://fred.stlouisfed.org) (calendar).
+3. Adjust the state/log paths in the scripts to your environment
+   (defaults point to `~/hooks/state/` and `~/hooks/logs/`).
+4. Run `scripts/xauusd_entry_m5.sh` every 5 minutes via cron/systemd.
 
-> Catatan: script aslinya jalan di sebuah VM dengan pola kredensial khusus
-> (`dynamic_credentials` surrogate). Untuk environment lain, ganti pemanggilan
-> API di `data/*.py` dengan API key dari `.env` kamu secara langsung.
+> Note: the scripts were built for a specific VM setup with a custom credential
+> pattern (`dynamic_credentials` surrogate). On other environments, replace the
+> API calls in `data/*.py` with your API key from `.env` directly.
 
-## Perintah Telegram
+## Telegram Commands
 
 `/alert_on` `/alert_off` `/cek` `/chart` `/trend` `/riwayat` `/set_modal`
 `/skip_trade` `/close_trade` `/cancel_trade` `/reset_trade`
 
-## Lisensi
+## License
 
-MIT — pakai, modifikasi, dan share dengan bebas. Risiko tetap milik masing-masing.
+MIT — use, modify, and share freely. The risk is yours.

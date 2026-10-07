@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""fix6sl.py — investigasi 6 SL beruntun XAUUSD (2026-10-05/06).
-PART A: rekonstruksi konteks tiap trade yang loss.
-READ-ONLY terhadap sistem live. Output: data untuk laporan.
+"""fix6sl.py — investigate the 6 consecutive XAUUSD SLs (2026-10-05/06).
+PART A: reconstruct the context of each losing trade.
+READ-ONLY on the live system. Output: data for the report.
 """
 import csv, glob, zipfile, datetime, bisect, json
 
@@ -101,7 +101,7 @@ trades = [
 ]
 
 print("\n" + "=" * 100)
-print("PART A — konteks tiap trade yang loss")
+print("PART A — context of each losing trade")
 print("=" * 100)
 for iso, sig, entry, sl_d in trades:
     ts = int(datetime.datetime.strptime(iso, "%Y-%m-%dT%H:%M:%SZ")
@@ -146,11 +146,11 @@ for iso, sig, entry, sl_d in trades:
             if bk[2] >= sl:
                 bars_to_sl = k - i; break
     wib = datetime.datetime.fromtimestamp(ts, WIB).strftime("%d %b %H:%M")
-    print(f"\n{sig} @{entry}  sinyal {iso} ({wib} WIB) — sesi {sess}")
-    print(f"  H4 trend: {trend} | ATR H1: {a:.2f} (median20: {atr_med:.2f}, rasio {a/atr_med:.2f})")
+    print(f"\n{sig} @{entry}  signal {iso} ({wib} WIB) — session {sess}")
+    print(f"  H4 trend: {trend} | ATR H1: {a:.2f} (median20: {atr_med:.2f}, ratio {a/atr_med:.2f})")
     print(f"  Donchian: upper {upper:.2f} lower {lower:.2f} mid {mid:.2f}")
-    print(f"  depth breakout: {depth:.2f} ({depth/a:+.2f} ATR) | jarak entry ke mid: {d_mid:.2f} ({d_mid/a:.2f} ATR)")
-    print(f"  range bar sinyal: {sig_range:.2f} ({sig_range/a:.2f} ATR) | close bar: {c:.2f}")
-    print(f"  MFE sblm SL: {mfe:.2f}R | TP1 tersentuh: {tp1_touched}"
-          + (f" (bar ke-{tp1_bar})" if tp1_touched else "")
-          + f" | SL kena di bar ke-{bars_to_sl} (~{bars_to_sl*5 if bars_to_sl else '?'} mnt)")
+    print(f"  breakout depth: {depth:.2f} ({depth/a:+.2f} ATR) | entry-to-mid distance: {d_mid:.2f} ({d_mid/a:.2f} ATR)")
+    print(f"  signal bar range: {sig_range:.2f} ({sig_range/a:.2f} ATR) | bar close: {c:.2f}")
+    print(f"  MFE before SL: {mfe:.2f}R | TP1 touched: {tp1_touched}"
+          + (f" (bar {tp1_bar})" if tp1_touched else "")
+          + f" | SL hit at bar {bars_to_sl} (~{bars_to_sl*5 if bars_to_sl else '?'} min)")

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""ema_filter_backtest.py — uji EMA20/50 sebagai FILTER arah pada strategi XAUUSD M5 v1.1.
-Basis: fix6sl_backtest.py (harness tervalidasi, replikasi logika live).
-READ-ONLY terhadap sistem live. Output: ~/workspace/trading-ea/research/ema_filter_RESULTS.md
+"""ema_filter_backtest.py — test EMA20/50 as a DIRECTION filter on the XAUUSD M5 v1.1 strategy.
+Basis: fix6sl_backtest.py (validated harness, replicates live logic).
+READ-ONLY on the live system. Output: ~/workspace/trading-ea/research/ema_filter_RESULTS.md
 
-Varian:
-  F1: state filter di H1 — BUY hanya jika EMA20_H1 > EMA50_H1; SELL hanya jika <.
-  F2: F1 + cross harus "segar" (cross terakhir <= 24 bar H1 lalu).
-  F3: state filter di M5 (timeframe trigger) — BUY hanya jika EMA20_M5 > EMA50_M5.
-Diagnostik: sinyal yang di-suppress dijalankan sebagai "phantom trade" untuk
-mengukur PF-nya — kalau yang dibuang malah bagus, filternya merusak.
+Variants:
+  F1: state filter on H1 — BUY only if EMA20_H1 > EMA50_H1; SELL only if <.
+  F2: F1 + the cross must be "fresh" (last cross <= 24 H1 bars ago).
+  F3: state filter on M5 (trigger timeframe) — BUY only if EMA20_M5 > EMA50_M5.
+Diagnostics: suppressed signals are run as "phantom trades" to measure
+their PF — if the discarded signals were actually good, the filter is harmful.
 """
 import sys, calendar, datetime, bisect
 sys.path.insert(0, "/home/hatch/workspace/trading-ea/research")
@@ -52,7 +52,7 @@ ema20_m5 = ema(m5c, 20)
 ema50_m5 = ema(m5c, 50)
 
 def ema_ok(mode, sig, i, j):
-    """True jika sinyal lolos filter EMA."""
+    """True if the signal passes the EMA filter."""
     if mode == "F1":
         d = diff_h1[j]
         return (sig == "BUY" and d > 0) or (sig == "SELL" and d < 0)
@@ -69,7 +69,7 @@ def ema_ok(mode, sig, i, j):
     return True
 
 def run_ema(mode, t_start, t_end):
-    """Seperti B.run(V11) tapi dengan filter EMA; return (trades, suppressed)."""
+    """Like B.run(V11) but with the EMA filter; returns (trades, suppressed)."""
     trades, suppressed = [], []
     live_pos = None
     runners, phantom = [], []

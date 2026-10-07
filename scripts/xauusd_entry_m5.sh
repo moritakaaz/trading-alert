@@ -176,8 +176,8 @@ def tg_send(text, photo=None, caption=None, silent=False, keyboard=None):
 ALERT_KB = {"inline_keyboard": [
     [{"text": "📈 Chart", "callback_data": "chart"},
      {"text": "✅ Status", "callback_data": "status"}],
-    [{"text": "⏸️ Pause 1 jam", "callback_data": "pause_1h"},
-     {"text": "🔴 Matikan", "callback_data": "alert_off"}],
+    [{"text": "⏸️ Pause 1h", "callback_data": "pause_1h"},
+     {"text": "🔴 Turn off", "callback_data": "alert_off"}],
 ]}
 
 now = int(time.time())
@@ -336,20 +336,20 @@ def heartbeat_maybe(reason):
     extra = ""
     if st.get("paused_until", 0) > now:
         mins = int((st["paused_until"] - now) / 60)
-        extra = f"\n⏸️ Pause aktif (~{mins} mnt lagi) — /alert_on untuk lanjutkan"
+        extra = f"\n⏸️ Pause active (~{mins} min left) — /alert_on to resume"
     elif at:
         tp1_px = round(at["entry"] + at["tp1_d"] * (1 if at["signal"] == "BUY" else -1), 2)
-        extra = f"\n📌 Posisi {at['signal']} @ ~${at['entry']} masih jalan (TP1 ${tp1_px})"
+        extra = f"\n📌 Position {at['signal']} @ ~${at['entry']} still running (TP1 ${tp1_px})"
     elif st.get("runner"):
         _rn = st["runner"]
         _mult = 1 if _rn["signal"] == "BUY" else -1
         _tp2 = int(round(_rn["entry"] + _mult * _rn["tp2_d"]))
-        extra = f"\n📌 Runner {_rn['signal']} @ ~${_rn['entry']} jalan (TP2 ${_tp2})"
+        extra = f"\n📌 Runner {_rn['signal']} @ ~${_rn['entry']} running (TP2 ${_tp2})"
     elif closed_kind in ("SL", "TP1"):
-        extra = (f"\n{'🛑 SL' if closed_kind == 'SL' else '🎯 TP1'} kena — "
-                 f"posisi ditutup, siap cari sinyal baru")
-    msg = (f"🟢 Alert entry AKTIF — {n}x cek hari ini, belum ada sinyal BUY/SELL\n"
-           f"(cek terakhir {wib_now} WIB). Ketik /alert_off untuk berhenti.{extra}")
+        extra = (f"\n{'🛑 SL' if closed_kind == 'SL' else '🎯 TP1'} hit — "
+                 f"position closed, ready for new signals")
+    msg = (f"🟢 Entry alert ACTIVE — {n}x checks today, no BUY/SELL signal yet\n"
+           f"(last check {wib_now} WIB). Type /alert_off to stop.{extra}")
     log("xauusd-entry-m5", "heartbeat")
     tg_send(msg, silent=True)  # heartbeat: no sound, so entries stand out
     out("wake", "heartbeat", {"message": msg, "polls_today": n,
@@ -487,19 +487,18 @@ def resolve_active_trade():
         if close_kind == "SL":
             px = int(round(entry - mult * sl_d))
             pct = (sl_d / _ma * 100) if _ma > 0 else 0
-            cmsg = (f"🛑 SL KENA — {at['signal']} @ ${entry}\n"
-                    f"💸 -{sl_d} {_mu} (-1R, -{pct:.1f}% dari modal) @ ${px}")
+            cmsg = (f"🛑 SL HIT — {at['signal']} @ ${entry}\n"
+                    f"💸 -{sl_d} {_mu} (-1R, -{pct:.1f}% of balance) @ ${px}")
             if _cb["consec_sl"] >= 2:
-                cmsg += (f"\n\n⚠️ CIRCUIT BREAKER: {_cb['consec_sl']}x SL "
-                         f"berturut-turut hari ini.\n"
-                         f"Market lagi choppy / kamu lagi tilt. "
-                         f"Pertimbangkan istirahat — /alert_off kalau perlu.")
+                cmsg += (f"\n\n⚠️ CIRCUIT BREAKER: {_cb['consec_sl']}x consecutive SL today.\n"
+                         f"Market is choppy / you may be on tilt. "
+                         f"Consider taking a break — /alert_off if needed.")
         else:
             px = int(round(entry + mult * tp1_d))
             pct = (tp1_d / _ma * 100) if _ma > 0 else 0
-            cmsg = (f"🎯 TP1 KENA — {at['signal']} @ ${entry}\n"
-                    f"💰 +{tp1_d} {_mu} (+1R, +{pct:.1f}% dari modal) @ ${px}\n"
-                    f"📌 SL ke breakeven, runner masih jalan")
+            cmsg = (f"🎯 TP1 HIT — {at['signal']} @ ${entry}\n"
+                    f"💰 +{tp1_d} {_mu} (+1R, +{pct:.1f}% of balance) @ ${px}\n"
+                    f"📌 Move SL to breakeven, runner still going")
         tg_send(cmsg)
         if close_kind == "TP1":
             # v1.3 runner tracking (2026-10-07, user-approved): after TP1,
@@ -561,22 +560,22 @@ def resolve_runner():
     if hit == "TP2":
         px = int(round(tp2_px))
         pct = (rn["tp2_d"] / _ma * 100) if _ma > 0 else 0
-        tg_send(f"🎯 TP2 KENA — {sig} @ ${entry}\n"
-                f"💰 +{rn['tp2_d']} {_mu} (+1.5R, +{pct:.1f}% dari modal) @ ${px}\n"
-                f"📌 Runner masih jalan ke TP3")
+        tg_send(f"🎯 TP2 HIT — {sig} @ ${entry}\n"
+                f"💰 +{rn['tp2_d']} {_mu} (+1.5R, +{pct:.1f}% of balance) @ ${px}\n"
+                f"📌 Runner still going to TP3")
         notified = notified + ["TP2"]
         log("xauusd-entry-m5", "runner-tp2")
     elif hit == "TP3":
         px = int(round(tp3_px))
         pct = (rn["tp3_d"] / _ma * 100) if _ma > 0 else 0
-        tg_send(f"🎯 TP3 KENA — {sig} @ ${entry}\n"
-                f"💰 +{rn['tp3_d']} {_mu} (+2R, +{pct:.1f}% dari modal) @ ${px}\n"
-                f"✅ Runner selesai — pertimbangkan tutup posisi")
+        tg_send(f"🎯 TP3 HIT — {sig} @ ${entry}\n"
+                f"💰 +{rn['tp3_d']} {_mu} (+2R, +{pct:.1f}% of balance) @ ${px}\n"
+                f"✅ Runner done — consider closing the position")
         notified = list(set(notified + ["TP2", "TP3"]))
         log("xauusd-entry-m5", "runner-tp3")
     else:  # BE
-        tg_send(f"🛑 Runner kena breakeven — {sig} @ ${entry}\n"
-                f"💸 0R di runner (TP1 +1R sudah aman)")
+        tg_send(f"🛑 Runner hit breakeven — {sig} @ ${entry}\n"
+                f"💸 0R on the runner (TP1 +1R already locked in)")
         notified = notified + ["BE"]
         log("xauusd-entry-m5", "runner-breakeven")
     if hit in ("TP2", "TP3"):
@@ -609,7 +608,7 @@ if sig == sig_prev:
 if st.get("last_bar") == bar_iso:
     log("xauusd-entry-m5", "dup"); out("silent", "already-alerted")
 
-# pause check (inline keyboard "⏸️ Pause 1 jam"): suppress signals but not
+# pause check (inline keyboard "⏸️ Pause 1h"): suppress signals but not
 # the heartbeat, so he still sees liveness while paused
 if st.get("paused_until", 0) > now:
     heartbeat_maybe("paused")
@@ -690,13 +689,13 @@ try:
         wib_s = rel.astimezone(WIB).strftime("%H:%M")
         dmin = (rel_utc - now) / 60
         if abs(dmin) <= 30:
-            when = f"{int(abs(dmin))} mnt lagi" if dmin > 0 else f"baru rilis {int(abs(dmin))} mnt lalu"
-            cal_lines.append(f"⚠️ {e['name']} {when} ({wib_s} WIB) — hindari entry dulu")
+            when = f"{int(abs(dmin))} min away" if dmin > 0 else f"just released {int(abs(dmin))} min ago"
+            cal_lines.append(f"⚠️ {e['name']} {when} ({wib_s} WIB) — avoid entries for now")
         elif e["date"] == today_iso:
-            cal_lines.append(f"📅 Hari ini: {e['name']} {wib_s} WIB")
+            cal_lines.append(f"📅 Today: {e['name']} {wib_s} WIB")
     future = [e for e in cal.get("events", []) if e["date"] > today_iso]
     if future and not cal_lines:
-        cal_lines.append(f"📅 Berikutnya: {future[0]['name']} {future[0]['date']}")
+        cal_lines.append(f"📅 Next: {future[0]['name']} {future[0]['date']}")
 except Exception as ex:
     log("xauusd-entry-m5", f"cal-fail:{str(ex)[:60]}")
 
@@ -734,31 +733,31 @@ try:
         session = "Asia"
     else:
         session = "Off-hours"
-    intel_lines.append(f"⏰ Sesi: {session}")
+    intel_lines.append(f"⏰ Session: {session}")
     # high-volatility windows: London/NY open ±45m
     if (13.25 <= wib_hm < 14.75) or (19.75 <= wib_hm < 21.25):
-        intel_lines.append("⚠️ Volatilitas tinggi (open sesi) — waspada spread melebar & false breakout")
+        intel_lines.append("⚠️ High volatility (session open) — watch for widening spreads & false breakouts")
     # abnormal signal bar: M5 range > 1.5x H1 ATR is extreme
     if (sig_bar[2] - sig_bar[3]) > 1.5 * a1:
-        intel_lines.append("⚠️ Candle sinyal abnormal (range > 1.5x ATR H1) — pertimbangkan wait & see")
+        intel_lines.append("⚠️ Abnormal signal candle (range > 1.5x H1 ATR) — consider wait & see")
 except Exception as ex:
     log("xauusd-entry-m5", f"intel-session-fail:{str(ex)[:40]}")
 
 # H4 trend: already computed earlier for the hard filter (v1.1+).
 # Signals reaching here are always aligned; this is confirmation.
 if h4_trend:
-    intel_lines.append(f"📊 H4 trend: {h4_trend} 🔥 searah (lolos filter)")
+    intel_lines.append(f"📊 H4 trend: {h4_trend} 🔥 aligned (passed filter)")
 
 # EMA20/50: already computed earlier for the hard filter (v1.2+).
 # Signals reaching here are always aligned; this is confirmation.
 if ema_trend:
-    intel_lines.append(f"📊 EMA20/50 H1: {ema_trend} 🔥 searah (lolos filter)")
+    intel_lines.append(f"📊 EMA20/50 H1: {ema_trend} 🔥 aligned (passed filter)")
 
 # retest zone: Donchian mid-line (for limit-order preference; the backtested
 # entry is the market entry above, this is an untested alternative)
 try:
     mid_dc = int(round((upper + lower) / 2))
-    intel_lines.append(f"💡 Zona retest (mid Donchian): ${mid_dc}")
+    intel_lines.append(f"💡 Retest zone (Donchian mid): ${mid_dc}")
 except Exception:
     pass
 
@@ -797,7 +796,7 @@ try:
     for name, px in (("SL", sl_px), ("TP1", tp1_px), ("TP2", tp2_px), ("TP3", tp3_px)):
         hits = _near(px)
         if hits:
-            lvl_warn.append(f"{name} dekat {', '.join(hits)}")
+            lvl_warn.append(f"{name} near {', '.join(hits)}")
     if lvl_warn:
         intel_lines.append("⚠️ Level: " + " | ".join(lvl_warn))
 except Exception as ex:
@@ -806,33 +805,33 @@ except Exception as ex:
 lines = [f"🚨 ENTRY XAUUSD (M5): {dir_emoji} {sig}",
          "",
          f"🎯 Entry: ${price}",
-         f"🛑 SL: ${sl_px} (${sl_d} dari entry)",
-         f"🎯 TP1: ${tp1_px} (${tp1_d} dari entry, 1R) → SL ke breakeven",
-         f"🎯 TP2: ${tp2_px} (${tp2_d} dari entry, 1.5R)",
-         f"🎯 TP3: ${tp3_px} (${tp3_d} dari entry, 2R runner)",
+         f"🛑 SL: ${sl_px} (${sl_d} from entry)",
+         f"🎯 TP1: ${tp1_px} (${tp1_d} from entry, 1R) → move SL to breakeven",
+         f"🎯 TP2: ${tp2_px} (${tp2_d} from entry, 1.5R)",
+         f"🎯 TP3: ${tp3_px} (${tp3_d} from entry, 2R runner)",
          ""]
 # trading intelligence (context only — signal logic unchanged)
 lines.extend(intel_lines)
 lines.append("")
-lines.extend([f"⚖️ Risiko @0.01 lot: ~{risk_usc} {m_unit} ({risk_pct:.1f}% dari modal)",
-         f"💡 Lot utk risiko ~2%: {lot_suggest:.2f} (risiko {lot_risk_pct:.1f}%)"])
+lines.extend([f"⚖️ Risk @0.01 lot: ~{risk_usc} {m_unit} ({risk_pct:.1f}% of balance)",
+         f"💡 Lot for ~2% risk: {lot_suggest:.2f} (risk {lot_risk_pct:.1f}%)"])
 # hard warning (not a block) when risk exceeds 2% of modal
 if risk_pct > 2:
-    lines.append(f"⚠️ RISIKO {risk_pct:.1f}% DARI MODAL (>2%) — pertimbangkan skip sinyal ini")
+    lines.append(f"⚠️ RISK {risk_pct:.1f}% OF BALANCE (>2%) — consider skipping this signal")
 lines.extend([
-         f"Level dari harga ref ({src}) — bisa beda tipis vs broker-mu, sesuaikan",
+         f"Levels from ref price ({src}) — may differ slightly vs your broker, adjust",
          ""])
 # fallback transparency: Kraken PAXGUSD is a proxy, not XAU/USD directly
 if "fallback" in src.lower():
-    lines.append("⚠️ [FALLBACK] Harga dari Kraken PAXGUSD, bukan XAU/USD langsung")
+    lines.append("⚠️ [FALLBACK] Price from Kraken PAXGUSD, not XAU/USD directly")
     log("xauusd-entry-m5", "alert-on-fallback-feed")
 lines.extend(cal_lines)
 if warn:
-    lines.append("\u26A0\uFE0F Headline menyebut event high-impact (NFP/CPI/FOMC) — waspada volatilitas")
+    lines.append("\u26A0\uFE0F Headline mentions a high-impact event (NFP/CPI/FOMC) — watch out for volatility")
 for hl in headlines:
     lines.append(f"\U0001F4F0 {hl}")
 lines.append("")
-lines.append("Bukan saran finansial, atur risikomu sendiri. Sinyal eksperimental (validasi PF 1.38, 265 trade). [strat v1.2]")
+lines.append("Not financial advice, manage your own risk. Experimental signal (validated PF 1.38, 265 trades). [strat v1.2]")
 msg = "\n".join(lines)
 
 # --- entry chart (candles + Donchian + SL/TP) ---
@@ -897,7 +896,7 @@ if os.environ.get("HATCH_HOOK_DRY_RUN") != "1":
 log("xauusd-entry-m5", f"wake-{sig.lower()}")
 # push to Telegram (direct, reliable) in addition to the side-chat worker wake
 tg_send(msg, photo=chart_path,
-        caption=f"📊 Chart XAUUSD M5 — {sig} @ ~${price}",
+        caption=f"📊 XAUUSD M5 Chart — {sig} @ ~${price}",
         keyboard=ALERT_KB)
 out("wake", f"xauusd-entry-{sig.lower()}-m5",
     {"signal": sig, "price": price, "bar_time_utc": bar_iso,
