@@ -2,7 +2,7 @@
 # Telegram command handler for XAUUSD alerts on the dedicated alert bot
 # (@ahsudahlah_bot — no other poller on this token, so no update conflicts).
 # Polls getUpdates (own offset), handles /start /alert_on /alert_off
-# /alert_status /cek /chart for Faqih only.
+# /alert_status /check /chart for Faqih only.
 # Replies go via Telegram Bot API directly; this hook NEVER wakes a worker.
 STATE_FILE="$HOME/hooks/state/xauusd_entry_m5.json"
 OFFSET_FILE="$HOME/hooks/state/tg_cmd_offset.json"
@@ -213,7 +213,7 @@ def status_text():
     _m = st.get("modal") or {"amount": 600, "currency": "usc"}
     _mu = "USC" if (_m.get("currency") or "usc") == "usc" else "USD"
     return (f"{emoji} <b>XAUUSD M5 alerts: {'ON' if on else 'OFF'}</b>\n"
-            f"💰 Balance: {_m.get('amount')} {_mu} (/set_modal to change)\n"
+            f"💰 Balance: {_m.get('amount')} {_mu} (/set_balance to change)\n"
             f"📊 {n_today}x checks today (last {last_poll} WIB)\n"
             f"🚨 Last signal: {esc(last_sig)}{pos_line}")
 
@@ -221,11 +221,11 @@ HELP = ("🤖 <b>XAUUSD alert bot commands</b>\n"
         "/alert_on — turn alerts on\n"
         "/alert_off — turn alerts off\n"
         "/alert_status — system status\n"
-        "/cek — status + last signal\n"
+        "/check — status + last signal\n"
         "/chart — live XAUUSD chart + data\n"
         "/trend — current H4 & H1 trend\n"
-        "/riwayat — last 10 signals + results\n"
-        "/set_modal — set balance (e.g. /set_modal 600 usc)\n"
+        "/history — last 10 signals + results\n"
+        "/set_balance — set balance (e.g. /set_balance 600 usc)\n"
         "/skip_trade — skip signal (no entry)\n"
         "/close_trade — close manually (sl|tp1|tp2|tp3|be|manual)\n"
         "/cancel_trade — cancel signal (invalid)\n"
@@ -483,20 +483,20 @@ def handle(text):
     cmd = text.strip().split()[0].split("@")[0].lower()
     if cmd == "/start":
         return HELP
-    if cmd == "/set_modal":
-        # /set_modal 600 usc  |  /set_modal 200  (keep currency)  |  /set_modal 50 usd
+    if cmd == "/set_balance":
+        # /set_balance 600 usc  |  /set_balance 200  (keep currency)  |  /set_balance 50 usd
         parts = text.strip().split()
         if len(parts) < 2:
             st0 = load_state()
             m0 = st0.get("modal") or {"amount": 600, "currency": "usc"}
             u0 = "USC" if (m0.get("currency") or "usc") == "usc" else "USD"
             return (f"💰 Current balance: <b>{m0.get('amount')} {u0}</b>\n"
-                    f"Usage: /set_modal &lt;amount&gt; [usd|usc]\n"
-                    f"Example: /set_modal 600 usc")
+                    f"Usage: /set_balance &lt;amount&gt; [usd|usc]\n"
+                    f"Example: /set_balance 600 usc")
         try:
             amount = float(parts[1])
         except ValueError:
-            return "❌ Amount must be a number. Example: /set_modal 600 usc"
+            return "❌ Amount must be a number. Example: /set_balance 600 usc"
         if amount <= 0:
             return "❌ Amount must be greater than 0."
         st0 = load_state()
@@ -511,7 +511,7 @@ def handle(text):
         unit = "USC" if modal["currency"] == "usc" else "USD"
         return (f"✅ <b>Balance set: {modal['amount']} {unit}</b>\n"
                 f"Risk % in alerts & notifications now uses this figure.\n"
-                f"Update again via /set_modal after each deposit/withdrawal.")
+                f"Update again via /set_balance after each deposit/withdrawal.")
     if cmd == "/alert_on":
         save_state({"alert_on": True, "paused_until": 0})
         return ("🟢 <b>XAUUSD alerts turned on.</b>\n"
@@ -520,9 +520,9 @@ def handle(text):
         save_state({"alert_on": False})
         return ("🔴 <b>XAUUSD alerts turned off.</b>\n"
                 "Send /alert_on to turn them on again.")
-    if cmd in ("/alert_status", "/cek"):
+    if cmd in ("/alert_status", "/check"):
         return status_text()
-    if cmd == "/riwayat":
+    if cmd == "/history":
         return history_text()
     if cmd == "/trend":
         return trend_text()
@@ -556,7 +556,7 @@ def handle(text):
             parts = text.strip().split()
             o = (parts[1] if len(parts) > 1 else "manual").lower()
             # FIX #3 (2026-10-05): use standard outcome format that
-            # /riwayat and scoreboard recognize (not "closed-tp1")
+            # /history and scoreboard recognize (not "closed-tp1")
             omap = {"sl": ("closed", "SL", "-1"),
                     "tp1": ("closed", "TP1", "1"),
                     "tp2": ("closed", "TP2", "1.5"),
@@ -591,7 +591,7 @@ def handle(text):
         return (f"✅ <b>{desc}</b>\n"
                 f"Position: {sig_txt}\n"
                 f"Monitoring new signals again.")
-    # (removed duplicate /alert_status,/cek,/riwayat handlers — 2026-10-05)
+    # (removed duplicate /alert_status,/check,/history handlers — 2026-10-05)
     if cmd == "/reset_trade":
         # Emergency reset: clear a stuck active_trade (e.g. state desync
         # where the journal says open but no position is actually tracked,

@@ -67,7 +67,7 @@ def save_journal_rows(update_fn):
     # FIX (2026-10-05): prevents lost updates when the alert script,
     # command handler, and scoreboard write concurrently.
     # Atomic write (tempfile + os.replace) ensures lock-free readers
-    # (/riwayat, /chart, self-heal) see old OR new, never partial.
+    # (/history, /chart, self-heal) see old OR new, never partial.
     # update_fn(rows) mutates the list of dicts in place; return False to abort.
     if os.environ.get("HATCH_HOOK_DRY_RUN") == "1":
         return False
@@ -644,7 +644,7 @@ tp1_d = int(round(1.5 * a1))   # 1R
 tp2_d = int(round(2.25 * a1))  # 1.5R
 tp3_d = int(round(3.0 * a1))   # 2R runner (research-validated full TP)
 price = int(round(sig_bar[4]))  # entry reference, whole numbers only (TradingView-friendly)
-# --- modal & risk (set via /set_modal; default 600 USC = HFM Cent account) ---
+# --- modal & risk (set via /set_balance; default 600 USC = HFM Cent account) ---
 # $1 gold move at 0.01 lot = 1 USC (cent) or $1 (USD) -> sl_d IS the risk
 # in account units at min lot; only the label differs by currency.
 _modal = st.get("modal") or {"amount": 600, "currency": "usc"}

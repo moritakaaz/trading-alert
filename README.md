@@ -77,8 +77,8 @@ cp .env.example .env
 
 ## Telegram Commands
 
-`/alert_on` `/alert_off` `/cek` `/chart` `/trend` `/riwayat` `/set_modal`
-`/skip_trade` `/close_trade` `/cancel_trade` `/reset_trade`
+`/alert_on` `/alert_off` `/alert_status` `/check` `/chart` `/trend` `/history`
+`/set_balance` `/skip_trade` `/close_trade` `/cancel_trade` `/reset_trade`
 
 ## License
 
