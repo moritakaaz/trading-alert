@@ -1,0 +1,36 @@
+# === Secrets — NEVER commit these ===
+.env
+*.env
+!.env.example
+*secret*
+*token*
+*.pem
+*.key
+
+# === Runtime state & logs (local only) ===
+state/
+logs/
+*.log
+*.jsonl
+*.lock
+*.csv
+
+# === Generated charts ===
+charts/*.png
+*.png
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.env/
+*.egg-info/
+
+# === OS / editor ===
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*~
