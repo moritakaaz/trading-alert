@@ -103,6 +103,10 @@ def main():
     except Exception as e:
         print(f"price fetch failed: {e}"); return
     now = time.time()
+    # v2.4 FIX #4: exclude the live forming bar (close time >= now).
+    # A wick on the live bar must not be scored as SL/TP.
+    _m5b = now - (now % 300)
+    bars = [b for b in bars if b["t"] < _m5b]
     # FIX (2026-10-05): read + score + write ALL inside the lock.
     # Prevents lost updates if the alert script appends a signal mid-run.
     result = {}

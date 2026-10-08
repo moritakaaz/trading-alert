@@ -23,7 +23,7 @@ Three independent alert systems: **M1** (1-min poll), **M5** (5-min poll),
 | Stop loss | 1.5 × ATR(14) H1 |
 | Take profit | TP1 1R → SL to breakeven, TP2 1.5R, TP3 2R (runner) |
 | Trend filter | **REMOVED** — all signals fire, both directions |
-| Management | One position at a time per timeframe; no signal stacking |
+| Management | Multi-position: new signals fire even with open trades; bot tracks latest for SL/TP |
 
 **Honest backtest results** (double top/bottom v2.3, first-valid p1, 9 months
 Jan–Oct 2026, 538 trades, PAXGUSDT M5 data):
@@ -52,9 +52,9 @@ v2.1 (greedy-nearest p1, PF 1.18, n=259).
 
 ```
 scripts/
-├── xauusd_entry_m5.sh    # M5 engine (legacy single-TF; kept for compatibility)
 ├── xauusd_entry_tf.sh    # Core engine: parameterized by TF env var (m1/m5/m15)
 ├── xauusd_entry_m1.sh    # M1 wrapper (TF=m1, 60s poll)
+├── xauusd_entry_m5tf.sh  # M5 wrapper (TF=m5, 300s poll)
 ├── xauusd_entry_m15.sh   # M15 wrapper (TF=m15, 300s poll)
 ├── xauusd_tg_cmd.sh      # Telegram command handler (/check, /chart, /history, ...)
 ├── make_chart.py         # Entry chart renderer: pattern/Donchian + SL/TP levels
@@ -90,7 +90,7 @@ cp .env.example .env
    (defaults point to `~/hooks/state/` and `~/hooks/logs/`).
 4. Run the alert pollers via cron/systemd:
    - `scripts/xauusd_entry_m1.sh` every 1 minute (M1)
-   - `scripts/xauusd_entry_m5.sh` every 5 minutes (M5)
+   - `scripts/xauusd_entry_m5tf.sh` every 5 minutes (M5)
    - `scripts/xauusd_entry_m15.sh` every 5 minutes (M15)
    Each is independent — enable only the timeframes you want.
 

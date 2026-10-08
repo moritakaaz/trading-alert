@@ -271,6 +271,15 @@ wd, hm = utc.weekday(), utc.hour + utc.minute / 60.0
 if wd == 5 or (wd == 6 and hm < 22) or (wd == 4 and hm >= 21) or (21 <= hm < 22):
     log(HOOK_ID, "market-closed"); out("silent", "market-closed")
 
+# v2.4 FIX #2: update last_heartbeat at start of EVERY run (not just in
+# heartbeat_maybe). Otherwise watchdog false-alarms after 15 min when
+# signals are firing (heartbeat_maybe is skipped on signal bars).
+# Guarded by dry-run check in save_state_keys.
+try:
+    save_state_keys({"last_heartbeat": now})
+except Exception:
+    pass
+
 # master on/off switch (toggled by !alert on/off on WA and /alert_on/off on TG)
 try:
     _s0 = json.load(open(STATE_FILE))
@@ -608,14 +617,17 @@ sig, pattern = detect_dtb()
 # v2.1 brutal: Donchian(48) H1 second trigger (NO EMA filter).
 # v2.1 brutal: double top/bottom takes priority; Donchian only if no pattern.
 # Channel = prior 48 completed H1 bars; trigger = M5 close beyond the band.
+# v2.4 FIX #1: edge trigger — only fire on FIRST breakout (prev close inside band).
+# Without this, every bar while price stays outside the channel re-triggers.
 if not sig and len(h1c) >= 48:
     _d_up = max(b[2] for b in h1c[-48:])
     _d_dn = min(b[3] for b in h1c[-48:])
-    if sig_bar[4] > _d_up:
+    _prev_c = prev_bar[4]
+    if sig_bar[4] > _d_up and _prev_c <= _d_up:
         sig, pattern = "BUY", {"kind": "DONCHIAN BREAKOUT", "neck": _d_up,
                                "upper": _d_up, "lower": _d_dn,
                                "p2_t": bar_iso}
-    elif sig_bar[4] < _d_dn:
+    elif sig_bar[4] < _d_dn and _prev_c >= _d_dn:
         sig, pattern = "SELL", {"kind": "DONCHIAN BREAKOUT", "neck": _d_dn,
                                 "upper": _d_up, "lower": _d_dn,
                                 "p2_t": bar_iso}
@@ -772,7 +784,9 @@ def resolve_active_trade():
         except Exception as _ex:
             log(HOOK_ID, f"journal-expire-fail:{str(_ex)[:40]}")
         return False, "expired"
-    bars = [b for b in tfbars if b[0] > at["bar_ts"]]
+    # v2.4 FIX #4: use closed_tf (fully closed bars only), NOT tfbars (includes
+    # the live forming bar). A wick on the live bar must not trigger SL/TP.
+    bars = [b for b in closed_tf if b[0] > at["bar_ts"]]
     if not bars:
         return True, None
     entry, sl_d, tp1_d = at["entry"], at["sl_d"], at["tp1_d"]
@@ -874,7 +888,8 @@ def resolve_runner():
         save_state_keys({"runner": None})
         log(HOOK_ID, "runner-expired")
         return False
-    bars = [b for b in tfbars if b[0] > rn["tp1_ts"]]
+    # v2.4 FIX #4: closed bars only (see above)
+    bars = [b for b in closed_tf if b[0] > rn["tp1_ts"]]
     if not bars:
         return True
     sig, entry = rn["signal"], rn["entry"]

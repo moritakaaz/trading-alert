@@ -818,15 +818,33 @@ def handle(text):
             outcome_map[cmd] = (_st, _oc, _rm,
                                 f"Trade closed manually ({o}).")
         status, outcome, rmult, desc = outcome_map[cmd]
+        # v2.4 FIX #3: target ONLY the active trade's journal row (by alert_time_utc),
+        # not all open rows. The old code corrupted PF stats by closing every open row.
+        _target_iso = None
+        if at and at.get("bar_ts"):
+            try:
+                _target_iso = datetime.datetime.fromtimestamp(
+                    at["bar_ts"], datetime.timezone.utc).strftime(
+                    "%Y-%m-%dT%H:%M:%SZ")
+            except Exception:
+                pass
         # update journal under lock
         def _lifecycle_update(rows):
+            _done = False
             for r in rows:
-                if r.get("status") == "open":
-                    r["status"] = status
-                    r["outcome"] = outcome
-                    r["closed_time_utc"] = datetime.datetime.now(
-                        datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-                    r["r_multiple"] = rmult
+                if r.get("status") != "open":
+                    continue
+                # if we have a target, only close that specific row
+                if _target_iso and r.get("alert_time_utc") != _target_iso:
+                    continue
+                r["status"] = status
+                r["outcome"] = outcome
+                r["closed_time_utc"] = datetime.datetime.now(
+                    datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                r["r_multiple"] = rmult
+                _done = True
+                if _target_iso:
+                    break  # only one row matches
             return True
         try:
             save_journal_rows(_lifecycle_update)
