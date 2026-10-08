@@ -11,7 +11,7 @@ position monitoring (TP1/TP2/TP3 + breakeven), and weekly performance reviews.
 Three independent alert systems: **M1** (1-min poll), **M5** (5-min poll),
 **M15** (5-min poll). Each has its own on/off switch and journal.
 
-## Strategy (v2.4, live)
+## Strategy (v2.5, live)
 
 > Experimental — no trend filter, dual trigger, high frequency, quality-scored.
 
@@ -24,6 +24,14 @@ Three independent alert systems: **M1** (1-min poll), **M5** (5-min poll),
 | Take profit | TP1 1R → SL to breakeven, TP2 1.5R, TP3 2R (runner) |
 | Trend filter | **REMOVED** — all signals fire, both directions |
 | Management | Multi-position: new signals fire even with open trades; bot tracks latest for SL/TP |
+
+**v2.5 reliability fixes:**
+- SL/TP + runner monitoring runs on **every poll** (not just via heartbeat)
+- Liveness (`last_run`) separated from heartbeat gate (`last_heartbeat`)
+- Telegram poller isolates per-update errors; offset advances per update
+- SL/TP monitoring continues even when alerts are off (positions are real)
+- Scoreboard: TP1+BE = +1R (full-position model), closed bars only
+- Setup Watch alerts: single message (photo+caption), includes Entry/SL/TP1/TP2/TP3 levels and BUY STOP/SELL STOP guidance
 
 **Honest backtest results** (double top/bottom v2.3, first-valid p1, 9 months
 Jan–Oct 2026, 538 trades, PAXGUSDT M5 data):
@@ -108,7 +116,8 @@ cp .env.example .env
 
 **Info & management:**
 `/menu` — interactive button menu (categorized)
-`/check` `/chart` `/trend` `/history`
+`/check` `/chart` `/trend` `/history` (paginated, 10/page with Next/Prev)
+`/export_journal` — export journal CSV by day/week/month/year
 `/set_balance` `/set_risk` `/set_lot` `/lot_calc`
 `/skip_trade` `/close_trade` `/cancel_trade` `/reset_trade`
 
