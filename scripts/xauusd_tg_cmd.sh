@@ -289,6 +289,7 @@ def status_text():
                             f"({t_wib} WIB, {r['status']}/{r['outcome'] or '-'})")
     except Exception:
         pass
+    on = st.get("alert_on", True)
     emoji = "🟢" if on else "🔴"
     at = st.get("active_trade")
     pos_line = ""
