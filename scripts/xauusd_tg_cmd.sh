@@ -1012,7 +1012,13 @@ def handle(text):
         for _l in [0.01, 0.02, 0.03, 0.05, 0.10]:
             _r = sl_d * (_l / 0.01) / _bal_usc * 100 if _bal_usc > 0 else 0
             _mark = " ← you" if abs(_l - float(st0.get("lot_size") or 0.01)) < 0.005 else ""
-            lines.append(f"  {_l:.2f} lot → {_r:.1f}%{_mark}")
+            # Show 3 decimals for tiny %, 1 decimal otherwise
+            _r_str = f"{_r:.3f}%" if _r < 0.1 else f"{_r:.1f}%"
+            lines.append(f"  {_l:.2f} lot → {_r_str}{_mark}")
+        # Sanity warning for absurd lot sizes
+        if rec_lot > 5.0:
+            lines.append("")
+            lines.append(f"⚠️ {rec_lot:.1f} lot is extremely high — check your balance/SL inputs.")
         return "\n".join(lines)
     if cmd in ("/alert_on", "/alert_on_m5"):
         save_state({"alert_on": True, "paused_until": 0})
