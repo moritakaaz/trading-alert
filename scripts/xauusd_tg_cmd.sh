@@ -621,7 +621,8 @@ def handle_chart():
 def handle_callback(data):
     # inline-keyboard taps from alert messages; mirrors the / commands
     _, chat_id = tg_creds()
-    if data == "chart":
+    # B09: chart callback may include TF (e.g. "chart:m1")
+    if data == "chart" or data.startswith("chart:"):
         photo, cap_or_err = handle_chart()
         if photo:
             tg_send_photo(chat_id, photo, cap_or_err)
@@ -654,18 +655,23 @@ def handle_callback(data):
                     pass
         else:
             tg_send(chat_id, f"❌ No trades found for period: {_period}")
-    elif data == "pause_1h":
-        save_state({"paused_until": int(time.time()) + 3600,
-                    "alert_on": True})
+    # B09: parse TF from callback_data (e.g. "pause_1h:m1", "alert_off:m15")
+    # Pause must NOT change alert_on. Each TF's state is modified independently.
+    elif data == "pause_1h" or data.startswith("pause_1h:"):
+        _action, _, _tf = data.partition(":")
+        _tf = _tf or "m5"
+        save_tf_state(_tf, {"paused_until": int(time.time()) + 3600})
         tg_send(chat_id,
-                "⏸️ <b>Alerts paused for 1 hour.</b>\n"
-                "Entry signals paused, heartbeat still running.\n"
-                "Send /alert_on_m5 to resume sooner.")
-    elif data == "alert_off":
-        save_state({"alert_on": False, "paused_until": 0})
+                f"⏸️ <b>{_tf.upper()} alerts paused for 1 hour.</b>\n"
+                f"Entry signals paused, heartbeat still running.\n"
+                f"Send /alert_on_{_tf} to resume sooner.")
+    elif data == "alert_off" or data.startswith("alert_off:"):
+        _action, _, _tf = data.partition(":")
+        _tf = _tf or "m5"
+        save_tf_state(_tf, {"alert_on": False, "paused_until": 0})
         tg_send(chat_id,
-                "🔴 <b>XAUUSD alerts turned off.</b>\n"
-                "Send /alert_on_m5 to turn them on again.")
+                f"🔴 <b>XAUUSD {_tf.upper()} alerts turned off.</b>\n"
+                f"Send /alert_on_{_tf} to turn them on again.")
     elif data.startswith("menu:"):
         # interactive menu navigation (v2.4)
         _m = data.split(":", 1)[1]
@@ -959,6 +965,8 @@ def handle(text):
         if _target_iso is None and open_rows:
             _target_iso = max(r.get("alert_time_utc", "") for r in open_rows)
         # update journal under lock
+        # B10: capture the target row's timeframe to clear the correct TF's state
+        _target_tf = ["m5"]
         def _lifecycle_update(rows):
             _done = False
             for r in rows:
@@ -972,6 +980,8 @@ def handle(text):
                 r["closed_time_utc"] = datetime.datetime.now(
                     datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
                 r["r_multiple"] = rmult
+                # B10: capture timeframe from the target row
+                _target_tf[0] = r.get("timeframe", "m5") or "m5"
                 _done = True
                 if _target_iso:
                     break  # only one row matches
@@ -980,7 +990,8 @@ def handle(text):
             save_journal_rows(_lifecycle_update)
         except Exception as ex:
             log("xauusd-tg-cmd", f"lifecycle-journal-fail:{str(ex)[:40]}")
-        save_state({"active_trade": None})
+        # B10: clear active_trade in the correct TF's state (not just M5)
+        save_tf_state(_target_tf[0], {"active_trade": None})
         sig_txt = f"{at.get('signal')} @ ${at.get('entry')}" if at else \
             f"{len(open_rows)} journal open"
         log("xauusd-tg-cmd", f"{cmd}:{sig_txt}")
@@ -992,15 +1003,20 @@ def handle(text):
         # Emergency reset: clear a stuck active_trade (e.g. state desync
         # where the journal says open but no position is actually tracked,
         # or a trade that should have resolved but didn't).
-        st0 = load_state()
-        at = st0.get("active_trade")
-        if not at:
+        # B10: check ALL TF states (not just M5) and clear any stuck trades.
+        _found = []
+        for _tf in ("m1", "m5", "m15"):
+            _st = load_tf_state(_tf)
+            _at = _st.get("active_trade")
+            if _at:
+                save_tf_state(_tf, {"active_trade": None})
+                _found.append(f"{_tf.upper()}: {_at.get('signal')} @ ~${_at.get('entry')}")
+                log("xauusd-tg-cmd", f"reset-trade:{_tf}:{_at.get('signal')}@{_at.get('entry')}")
+        if not _found:
             return ("ℹ️ No active position to reset.\n"
                     "The system is already monitoring new signals.")
-        save_state({"active_trade": None})
-        log("xauusd-tg-cmd", f"reset-trade:{at.get('signal')}@{at.get('entry')}")
         return (f"🔄 <b>active_trade reset.</b>\n"
-                f"Position {at.get('signal')} @ ~${at.get('entry')} removed from tracking.\n"
+                f"Cleared: {'; '.join(_found)}\n"
                 f"The system is monitoring new signals again.")
     if cmd.startswith("/"):
         return "❓ Unknown command.\n" + HELP

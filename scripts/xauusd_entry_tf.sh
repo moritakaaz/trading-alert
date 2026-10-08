@@ -152,19 +152,12 @@ def tg_send(text, photo=None, caption=None, silent=False, keyboard=None):
         base = "https://api.telegram.org/bot" + tok
         def esc(s):
             return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        if photo and os.path.isfile(photo):
-            # send photo WITH the message text as caption (single message)
-            subprocess.run(["curl", "-s", "-m", "25",
-                            "-F", "chat_id=" + cid,
-                            "-F", "photo=@" + photo,
-                            "-F", "caption=" + esc(caption or text),
-                            "-F", "parse_mode=HTML",
-                            base + "/sendPhoto"],
-                           capture_output=True, timeout=30)
-            return  # don't send separate text message
+        # B01 (P0): ALWAYS send text via sendMessage first (checked).
+        # Photo sent separately with short caption. If photo fails,
+        # text alert is not lost.
         cmd = ["curl", "-s", "-m", "25",
                "--data-urlencode", "chat_id=" + cid,
-               "--data-urlencode", "text=" + esc(text),
+               "--data-urlencode", "text=" + esc(text[:4096]),
                "--data-urlencode", "parse_mode=HTML"]
         if silent:
             cmd += ["--data-urlencode", "disable_notification=true"]
@@ -188,8 +181,29 @@ def tg_send(text, photo=None, caption=None, silent=False, keyboard=None):
             log(HOOK_ID, "tg-sent")
         else:
             log(HOOK_ID, "tg-fail:sendMessage-failed-2x")
+            return False
+        # B01: send photo separately with short caption (<=1000 chars)
+        # Text already sent and confirmed, so photo failure doesn't lose alert
+        if photo and os.path.isfile(photo):
+            try:
+                _cap = (caption or f"📊 Chart")[:1000]
+                pr = subprocess.run(["curl", "-s", "-m", "25",
+                                "-F", "chat_id=" + cid,
+                                "-F", "photo=@" + photo,
+                                "-F", "caption=" + esc(_cap),
+                                "-F", "parse_mode=HTML",
+                                base + "/sendPhoto"],
+                               capture_output=True, timeout=30)
+                if b'"ok":true' in (pr.stdout or b""):
+                    log(HOOK_ID, "tg-photo-sent")
+                else:
+                    log(HOOK_ID, "tg-fail:sendPhoto-failed")
+            except Exception as _pex:
+                log(HOOK_ID, f"tg-fail:photo-{str(_pex)[:40]}")
+        return True
     except Exception as ex:
         log(HOOK_ID, f"tg-fail:{str(ex)[:60]}")
+        return False
 
 def tg_edit_or_send(text, state_key, silent=True):
     # v2.4: heartbeat replace method — edit the previous heartbeat message
@@ -258,12 +272,14 @@ def tg_edit_or_send(text, state_key, silent=True):
         return False
 
 # inline keyboard for entry alerts: chart / status / pause / off
-ALERT_KB = {"inline_keyboard": [
-    [{"text": "📈 Chart", "callback_data": "chart"},
-     {"text": "✅ Status", "callback_data": "status"}],
-    [{"text": "⏸️ Pause 1h", "callback_data": "pause_1h"},
-     {"text": "🔴 Turn off", "callback_data": "alert_off"}],
-]}
+# B09: callback_data includes TF so the handler modifies the correct TF's state
+def ALERT_KB(tf):
+    return {"inline_keyboard": [
+        [{"text": "📈 Chart", "callback_data": f"chart:{tf}"},
+         {"text": "✅ Status", "callback_data": "status"}],
+        [{"text": "⏸️ Pause 1h", "callback_data": f"pause_1h:{tf}"},
+         {"text": "🔴 Turn off", "callback_data": f"alert_off:{tf}"}],
+    ]}
 
 now = int(time.time())
 utc = datetime.datetime.fromtimestamp(now, datetime.timezone.utc)
@@ -557,10 +573,10 @@ def detect_setup():
         # v2.4 clean check
         if max(H[p1+1:p2]) > max(H[p1], H[p2]) + 1e-9:
             continue
-        if sc < vlo and sc < so:
-            continue  # already confirmed -> real signal, not a setup
-        # only warn if price is near the neckline (within 0.5xATR) — far away = not actionable
-        if sc - vlo > 0.5 * a1:
+        # B03: price must be AT or ABOVE neckline (not yet broken), max 0.5 ATR away.
+        # This replaces the old two checks and fixes case B (price already below
+        # neckline but green candle still sent a SETUP WATCH).
+        if not (0.0 <= sc - vlo <= 0.5 * a1):
             continue
         _score, _grade, _rsi_div = score_pattern("SELL", p1, p2, vi, vlo)
         best = (p2, "SELL", {"kind": "DOUBLE TOP", "p1": H[p1],
@@ -597,9 +613,8 @@ def detect_setup():
         # v2.4 clean check
         if min(L[p1+1:p2]) < min(L[p1], L[p2]) - 1e-9:
             continue
-        if sc > vhi and sc > so:
-            continue  # already confirmed -> real signal, not a setup
-        if vhi - sc > 0.5 * a1:
+        # B03: price must be AT or BELOW neckline (not yet broken), max 0.5 ATR away.
+        if not (0.0 <= vhi - sc <= 0.5 * a1):
             continue
         if best is None or p2 > best[0]:
             _score, _grade, _rsi_div = score_pattern("BUY", p1, p2, pi, vhi)
@@ -730,8 +745,10 @@ def resolve_active_trade():
             jpath = os.path.expanduser("~/hooks/state/entry_journal.csv")
             with open(jpath) as jf:
                 # guard against None rows from partial writes
+                # B11: only consider rows from THIS timeframe
                 rows = [r for r in _csv.DictReader(jf)
-                        if r and r.get("status") == "open"]
+                        if r and r.get("status") == "open"
+                        and r.get("timeframe") == TF]
             if rows:
                 last = rows[-1]
                 bar_ts = int(datetime.datetime.fromisoformat(
@@ -980,11 +997,39 @@ if sig is None:
     # v2.4: no suppression for active trades (multi-position mode).
     _setup_sig, _setup_pat = detect_setup()
     _paused = st.get("paused_until", 0) > now
+    # B02: neckline touch notification (once per pattern, intrabar).
+    # Uses touch_p2_t key, similar to setup_p2_t.
+    if _setup_sig and _setup_pat and not _paused:
+        try:
+            _touch_neck = _setup_pat["neck"]
+            _touch_p2t = _setup_pat.get("p2_t")
+            # forming bar = last bar in tfbars if not yet closed
+            _forming = tfbars[-1] if tfbars and tfbars[-1][0] >= tfb else None
+            if _forming and st.get("touch_p2_t") != _touch_p2t:
+                _touched = False
+                if _setup_sig == "SELL":
+                    _touched = _forming[3] <= _touch_neck  # low touched/broke neckline
+                else:  # BUY
+                    _touched = _forming[2] >= _touch_neck  # high touched/broke neckline
+                if _touched:
+                    _touch_msg = (
+                        f"⚠️ NECKLINE TERSENTUH (belum close) — {_setup_sig} ${_touch_neck:.2f}\n"
+                        f"Harga menyentuh neckline di tengah candle. "
+                        f"ENTRY hanya jika candle {TF_UP} TUTUP "
+                        f"{'di bawah' if _setup_sig == 'SELL' else 'di atas'} ${_touch_neck:.2f} "
+                        f"DAN berwarna {'merah' if _setup_sig == 'SELL' else 'hijau'}."
+                    )
+                    tg_send(_touch_msg, silent=False)
+                    save_state_keys({"touch_p2_t": _touch_p2t})
+                    log(HOOK_ID, f"wake-touch-{_setup_sig.lower()}")
+        except Exception as _tex:
+            log(HOOK_ID, f"touch-fail:{str(_tex)[:60]}")
     if (_setup_sig and not _paused
             and st.get("setup_p2_t") != _setup_pat.get("p2_t")):
         try:
-            _neck = int(round(_setup_pat["neck"]))
-            _cur = int(round(sig_bar[4]))
+            # B05: neckline as float with 2 decimals (not int-rounded)
+            _neck = _setup_pat["neck"]
+            _cur = sig_bar[4]
             _dist = abs(_cur - _neck)
             _dir_emoji = "🟢" if _setup_sig == "BUY" else "🔴"
             _wib = datetime.datetime.fromtimestamp(
@@ -996,16 +1041,18 @@ if sig is None:
             _t1 = int(round(_neck + _m * _sl_d))
             _t2 = int(round(_neck + _m * _sl_d * 1.5))
             _t3 = int(round(_neck + _m * _sl_d * 2.0))
+            # B02: new text explaining close-confirmation, no stop-order instruction
             _setup_msg = (
                 f"⚠️ SETUP WATCH ({TF_UP}): potential {_setup_sig} forming\n"
-                f"📐 Pattern: {_setup_pat['kind']} (neckline ${_neck})"
+                f"📐 Pattern: {_setup_pat['kind']} (neckline ${_neck:.2f})"
                 f" · ⭐ Grade {_setup_pat.get('grade','?')} ({_setup_pat.get('score','?')}/100)\n"
-                f"💰 Current: ${_cur} (${_dist} from neckline)\n"
+                f"💰 Current: ${_cur:.2f} (${_dist:.2f} from neckline)\n"
                 f"👀 Standby — NOT an entry signal.\n"
-                f"{'Entry triggers if a candle closes above' if _setup_sig == 'BUY' else 'Entry triggers if a candle closes below'} ${_neck}.\n"
-                f"To prepare: place {'BUY STOP' if _setup_sig == 'BUY' else 'SELL STOP'} at ${_neck} "
-                f"(not {'buy' if _setup_sig == 'BUY' else 'sell'} limit).\n"
-                f"🎯 Entry ${_neck} · 🛑 SL ${_sl} · TP1 ${_t1} · TP2 ${_t2} · TP3 ${_t3}\n"
+                f"Entry dikonfirmasi HANYA jika candle {TF_UP} TUTUP "
+                f"{'di bawah' if _setup_sig == 'SELL' else 'di atas'} ${_neck:.2f} "
+                f"DAN berwarna {'merah' if _setup_sig == 'SELL' else 'hijau'}. "
+                f"Stop order bisa terisi saat harga hanya menyentuh level (sebelum close).\n"
+                f"🎯 Entry ${_neck:.2f} · 🛑 SL ${_sl} · TP1 ${_t1} · TP2 ${_t2} · TP3 ${_t3}\n"
                 f"\n🕐 {_wib} WIB [setup v2.4]"
             )
             # chart of the forming pattern
@@ -1325,15 +1372,14 @@ try:
 except Exception as ex:
     log(HOOK_ID, f"chart-fail:{str(ex)[:80]}")
 
-st["last_bar"] = bar_iso
-# v2.4 multi-position: track the LATEST signal for SL/TP notifications.
-# New signals overwrite; the journal records all. No suppression.
 st["active_trade"] = {"signal": sig, "entry": price, "sl_d": sl_d,
                       "tp1_d": tp1_d, "tp2_d": tp2_d, "tp3_d": tp3_d,
                       "bar_ts": sig_bar[0], "ts": now}
+# B31: save active_trade now (for SL/TP monitoring), but DON'T save dedupe
+# markers (last_bar, pattern_p2_t) yet — only after tg_send succeeds.
+# If sending fails, the signal will be retried on the next poll.
 # don't consume the signal on dry runs (a dry-run wake must not silence the next live poll)
-save_state_keys({"last_bar": bar_iso, "active_trade": st["active_trade"],
-                 "pattern_p2_t": pattern["p2_t"]})
+save_state_keys({"active_trade": st["active_trade"]})
 if os.environ.get("HATCH_HOOK_DRY_RUN") != "1":
     # --- alert journal for outcome tracking / learning loop ---
     # Uses save_journal_rows (locked) to prevent lost updates.
@@ -1360,8 +1406,15 @@ if os.environ.get("HATCH_HOOK_DRY_RUN") != "1":
 log(HOOK_ID, f"wake-{sig.lower()}")
 # push to Telegram (direct, reliable) in addition to the side-chat worker wake
 # full message as photo caption (single message, not split)
-tg_send(msg, photo=chart_path,
-        keyboard=ALERT_KB)
+_tg_ok = tg_send(msg, photo=chart_path,
+        keyboard=ALERT_KB(TF))
+# B31: save dedupe markers ONLY after successful send.
+# If tg_send failed, don't save — signal will be retried next poll.
+if _tg_ok:
+    st["last_bar"] = bar_iso
+    save_state_keys({"last_bar": bar_iso, "pattern_p2_t": pattern["p2_t"]})
+else:
+    log(HOOK_ID, "tg-send-failed-dedupe-not-saved-will-retry")
 out("wake", f"{HOOK_ID}-{sig.lower()}",
     {"signal": sig, "price": price, "bar_time_utc": bar_iso,
      "atr_h1": round(a1, 2), "sl_distance": sl_d,
