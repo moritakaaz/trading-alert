@@ -271,12 +271,11 @@ wd, hm = utc.weekday(), utc.hour + utc.minute / 60.0
 if wd == 5 or (wd == 6 and hm < 22) or (wd == 4 and hm >= 21) or (21 <= hm < 22):
     log(HOOK_ID, "market-closed"); out("silent", "market-closed")
 
-# v2.4 FIX #2: update last_heartbeat at start of EVERY run (not just in
-# heartbeat_maybe). Otherwise watchdog false-alarms after 15 min when
-# signals are firing (heartbeat_maybe is skipped on signal bars).
-# Guarded by dry-run check in save_state_keys.
+# v2.5: liveness marker updated every run. Separate from last_heartbeat
+# (the 5-min Telegram gate) to avoid the R1 regression where the gate
+# was always closed.
 try:
-    save_state_keys({"last_heartbeat": now})
+    save_state_keys({"last_run": now})
 except Exception:
     pass
 
@@ -670,11 +669,8 @@ def heartbeat_maybe(reason):
     wib_now = datetime.datetime.fromtimestamp(now, WIB).strftime("%H:%M")
     save_state_keys({"last_heartbeat": now})
     # show active-trade info so he knows why no new signals are coming
-    # FIX (2026-10-05): resolve_active_trade is called here AND at line ~473.
-    # If it just closed a trade (SL/TP1 notification already sent), skip the
-    # heartbeat — the user doesn't need two messages for one event.
-    active, closed_kind = resolve_active_trade()
-    resolve_runner()  # v1.3: post-TP1 runner watch (TP2/TP3/BE alerts)
+    # v2.5: use pre-computed monitor results (not a duplicate call)
+    active, closed_kind = _mon_active, _mon_closed
     if closed_kind in ("SL", "TP1", "expired"):
         log(HOOK_ID, f"heartbeat-skipped-after-{closed_kind.lower()}")
         out("silent", f"trade-closed-{closed_kind.lower()}-notified")
@@ -771,7 +767,7 @@ def resolve_active_trade():
                         "%Y-%m-%dT%H:%M:%SZ")
                     # actual R from last available close
                     try:
-                        _last = tfbars[-1][4] if tfbars else at["entry"]
+                        _last = closed_tf[-1][4] if closed_tf else at["entry"]  # v2.5: closed bars only
                         _m = 1 if at["signal"] == "BUY" else -1
                         _pnl = (_last - at["entry"]) * _m
                         _r["r_multiple"] = str(round(_pnl / at["sl_d"], 2))
@@ -963,6 +959,12 @@ def resolve_runner():
     save_state_keys({"runner": st["runner"]})
     return not done
 
+# v2.5 FIX (R1): SL/TP and runner monitoring run on EVERY poll.
+# Previously they were only reachable through heartbeat_maybe (or the signal
+# path), so with no new signal the open trade was never checked.
+_mon_active, _mon_closed = resolve_active_trade()
+resolve_runner()
+
 if sig is None:
     # v2.2: setup watch — pattern forming but not confirmed yet.
     # Early "standby" alert so he can prepare before the entry signal.
@@ -1043,10 +1045,8 @@ if st.get("paused_until", 0) > now:
 # (ema_trend is still computed above; shown in the alert intel
 # block for context only, never blocking.)
 
-# one position at a time: suppress new signals while the previous trade is
-# still active (no SL hit, no TP1 touch, <48h)
-active, _closed = resolve_active_trade()
-resolve_runner()  # v1.3: post-TP1 runner watch (TP2/TP3/BE alerts)
+# v2.5: use pre-computed monitor results (not duplicate calls)
+active, _closed = _mon_active, _mon_closed
 # v2.4: multi-position — NO suppression. New signals fire even with active trades.
 # The bot tracks the LATEST signal for SL/TP notifications; the journal records all.
 # (User requested 2026-10-08: "buat agar muncul signal lagi")

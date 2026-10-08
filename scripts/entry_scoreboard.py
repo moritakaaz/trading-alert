@@ -86,7 +86,7 @@ def score_row(r, bars, now):
         else:
             return False  # still open
     elif be_hit:
-        outcome, rmult = f"TP{max_tp}+BE", 0.0
+        outcome, rmult = f"TP{max_tp}+BE", {1: 1.0, 2: 1.5, 3: 2.0}.get(max_tp, 0.0)  # v2.5: full-position model
     else:
         rmult = float({1: 1.0, 2: 1.5, 3: 2.0}[max_tp])
         outcome, closed_t = f"TP{max_tp}", max_tp_t or expired_t

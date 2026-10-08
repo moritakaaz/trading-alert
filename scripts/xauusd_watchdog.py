@@ -104,8 +104,8 @@ def check_tf(tf, now):
         return
 
     # --- 1. heartbeat freshness ---
-    # heartbeat is every 5 min (replace method edits in place)
-    last_hb = st.get("last_heartbeat", 0)
+    # v2.5: check last_run (liveness), not last_heartbeat (message gate)
+    last_hb = st.get("last_run", 0)
     if in_forex_hours(now) and now - last_hb > 900:
         mins = int((now - last_hb) / 60)
         last_wd = st.get("watchdog_last_alert", 0)

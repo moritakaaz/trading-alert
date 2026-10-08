@@ -828,6 +828,9 @@ def handle(text):
                     "%Y-%m-%dT%H:%M:%SZ")
             except Exception:
                 pass
+        # v2.5: if no active_trade (state desync), target only the NEWEST open row
+        if _target_iso is None and open_rows:
+            _target_iso = max(r.get("alert_time_utc", "") for r in open_rows)
         # update journal under lock
         def _lifecycle_update(rows):
             _done = False
@@ -889,48 +892,51 @@ try:
     for u in d.get("result", []):
         uid = u.get("update_id", 0)
         max_id = max(max_id, uid + 1)
-        # inline-keyboard taps arrive as callback_query
-        cq = u.get("callback_query")
-        if cq:
-            cq_chat = str((cq.get("message") or {}).get("chat", {}).get("id"))
-            if cq_chat == CHAT_ID:
-                # FIX #7 (2026-10-05): DRY-guard the callback answer —
-                # dry runs must not send real Telegram API calls
-                if os.environ.get("HATCH_HOOK_DRY_RUN") != "1":
-                    try:
-                        tg_api("answerCallbackQuery",
-                               {"callback_query_id": cq.get("id")})
-                    except Exception:
-                        pass
-                handle_callback(cq.get("data", ""))
-                log("xauusd-tg-cmd", f"handled-callback:{cq.get('data', '')}")
-            continue
-        m = u.get("message") or {}
-        if str(m.get("chat", {}).get("id")) != CHAT_ID:
-            continue
-        text = (m.get("text") or "").strip()
-        if not text.startswith("/"):
-            continue
-        cmd = text.split()[0].split("@")[0].lower()
-        if cmd == "/chart":
-            photo, cap_or_err = handle_chart()
-            if photo:
-                tg_send_photo(CHAT_ID, photo, cap_or_err)
-            else:
-                tg_send(CHAT_ID, cap_or_err)
-            log("xauusd-tg-cmd", "handled:/chart")
-            continue
-        reply = handle(text)
-        if reply:
-            if reply.startswith("MENU:"):
-                # v2.4: interactive menu - send with keyboard
-                _section = reply.split(":", 1)[1]
-                _kb, _txt = build_menu(_section)
-                tg_send(CHAT_ID, _txt, keyboard=_kb)
-            else:
-                tg_send(CHAT_ID, reply)
-            log("xauusd-tg-cmd", f"handled:{text.split()[0]}")
-    set_offset(max_id)
+        try:
+            # inline-keyboard taps arrive as callback_query
+            cq = u.get("callback_query")
+            if cq:
+                cq_chat = str((cq.get("message") or {}).get("chat", {}).get("id"))
+                if cq_chat == CHAT_ID:
+                    # FIX #7 (2026-10-05): DRY-guard the callback answer —
+                    # dry runs must not send real Telegram API calls
+                    if os.environ.get("HATCH_HOOK_DRY_RUN") != "1":
+                        try:
+                            tg_api("answerCallbackQuery",
+                                   {"callback_query_id": cq.get("id")})
+                        except Exception:
+                            pass
+                    handle_callback(cq.get("data", ""))
+                    log("xauusd-tg-cmd", f"handled-callback:{cq.get('data', '')}")
+                continue
+            m = u.get("message") or {}
+            if str(m.get("chat", {}).get("id")) != CHAT_ID:
+                continue
+            text = (m.get("text") or "").strip()
+            if not text.startswith("/"):
+                continue
+            cmd = text.split()[0].split("@")[0].lower()
+            if cmd == "/chart":
+                photo, cap_or_err = handle_chart()
+                if photo:
+                    tg_send_photo(CHAT_ID, photo, cap_or_err)
+                else:
+                    tg_send(CHAT_ID, cap_or_err)
+                log("xauusd-tg-cmd", "handled:/chart")
+                continue
+            reply = handle(text)
+            if reply:
+                if reply.startswith("MENU:"):
+                    # v2.4: interactive menu - send with keyboard
+                    _section = reply.split(":", 1)[1]
+                    _kb, _txt = build_menu(_section)
+                    tg_send(CHAT_ID, _txt, keyboard=_kb)
+                else:
+                    tg_send(CHAT_ID, reply)
+                log("xauusd-tg-cmd", f"handled:{text.split()[0]}")
+        except Exception as _uex:
+            log("xauusd-tg-cmd", f"update-fail:{uid}:{str(_uex)[:60]}")
+        set_offset(max_id)  # v2.5: advance per update, so a bad update is skipped
     log("xauusd-tg-cmd", "poll-ok")
 except Exception as ex:
     log("xauusd-tg-cmd", f"fail:{str(ex)[:80]}")
