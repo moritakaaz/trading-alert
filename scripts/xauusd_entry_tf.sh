@@ -149,6 +149,39 @@ def _curl_noleak(url, args, timeout=30):
         except Exception:
             pass
 
+def tg_send_photo_only(text, photo_path, silent=False):
+    """Send photo with text as caption in ONE message.
+    For setup watch (short text <1024 chars)."""
+    try:
+        if os.environ.get("HATCH_HOOK_DRY_RUN") == "1":
+            return True
+        tok, cid = None, None
+        with open(os.path.expanduser("~/.tg-alert-bot/.env")) as f:
+            for line in f:
+                if line.startswith("TELEGRAM_BOT_TOKEN="):
+                    tok = line.strip().split("=", 1)[1]
+                elif line.startswith("TELEGRAM_CHAT_ID="):
+                    cid = line.strip().split("=", 1)[1]
+        if not tok or not cid:
+            return False
+        base = "https://api.telegram.org/bot" + tok
+        def esc(s):
+            return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        _args = ["-s", "-m", "25",
+                 "-F", "chat_id=" + cid,
+                 "-F", "photo=@" + photo_path,
+                 "-F", "caption=" + esc(text[:1024]),
+                 "-F", "parse_mode=HTML"]
+        if silent:
+            _args += ["-F", "disable_notification=true"]
+        r = _curl_noleak(base + "/sendPhoto", _args, timeout=30)
+        ok = b'"ok":true' in (r.stdout or b"")
+        log(HOOK_ID, "tg-photo-sent" if ok else "tg-fail:sendPhoto-failed")
+        return ok
+    except Exception as ex:
+        log(HOOK_ID, f"tg-fail:{str(ex)[:60]}")
+        return False
+
 def tg_send(text, photo=None, caption=None, silent=False, keyboard=None):
     # push alert to Faqih's Telegram via the dedicated alert bot
     # (@ahsudahlah_bot); silent on any failure, never on dry runs;
@@ -1100,8 +1133,12 @@ if sig is None:
                  _tmp_in], capture_output=True, text=True, timeout=60)
             os.remove(_tmp_in)
             _chart_url = None  # B24: no sandbox URL; chart sent as local file
-            tg_send(_setup_msg, silent=False,
-                    photo=_chart_path if os.path.exists(_chart_path) else None)
+            # Setup watch: ONE message (photo with text as caption, fits in 1024)
+            # Different from entry alerts which have full intelligence block
+            if os.path.exists(_chart_path):
+                tg_send_photo_only(_setup_msg, _chart_path, silent=False)
+            else:
+                tg_send(_setup_msg, silent=False)
             save_state_keys({"setup_p2_t": _setup_pat.get("p2_t")})
             log(HOOK_ID, f"wake-setup-{_setup_sig.lower()}")
             out("wake", f"xauusd-setup-{_setup_sig.lower()}-{TF}",
