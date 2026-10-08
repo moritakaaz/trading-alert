@@ -717,9 +717,10 @@ def handle_callback(data):
         st0 = load_state()
         bals = st0.get("balances") or {}
         if _target == "all":
-            save_state({"balances": {},
+            save_state({"balances": {"usc": 600},
                        "modal": {"amount": 600, "currency": "usc"},
-                       "active_currency": "usc"})
+                       "active_currency": "usc",
+                       "_pending_balance_cur": None})
             tg_send(chat_id, "🗑️ <b>All balances deleted.</b> Reset to default 600 USDc.")
         elif _target in bals:
             _u = {"idr": "IDR", "usd": "USD", "usc": "USDc"}[_target]
@@ -738,6 +739,19 @@ def handle_callback(data):
             tg_send(chat_id, "❌ Nothing to delete.")
     elif data == "bal:cancel":
         tg_send(chat_id, "Cancelled.")
+    elif data.startswith("bal:active:"):
+        _cur = data.split(":", 2)[2]
+        st0 = load_state()
+        bals = st0.get("balances") or {}
+        if _cur in bals:
+            _unit = {"idr": "IDR", "usd": "USD", "usc": "USDc"}[_cur]
+            save_state({"active_currency": _cur,
+                       "modal": {"amount": bals[_cur], "currency": _cur},
+                       "_pending_balance_cur": None})
+            tg_send(chat_id, f"✅ <b>Active currency: {_unit} ({bals[_cur]:,})</b>\n"
+                            f"Risk calculations now use this balance.")
+        else:
+            tg_send(chat_id, "❌ No balance set for this currency.")
     # B09: parse TF from callback_data (e.g. "pause_1h:m1", "alert_off:m15")
     # Pause must NOT change alert_on. Each TF's state is modified independently.
     elif data == "pause_1h" or data.startswith("pause_1h:"):
@@ -899,12 +913,21 @@ def handle(text):
             lines.append(f"• {unit}: {amt:,}{mark}" if isinstance(amt,(int,float)) else f"• {unit}: —{mark}")
         lines.append("")
         lines.append("Tap a currency to set its balance, or 🗑️ to delete.")
-        kb = {"inline_keyboard": [
+        kb_rows = [
             [{"text": "💵 IDR", "callback_data": "bal:cur:idr"},
              {"text": "💵 USD", "callback_data": "bal:cur:usd"},
              {"text": "💵 USDc", "callback_data": "bal:cur:usc"}],
-            [{"text": "🗑️ Delete balance", "callback_data": "bal:del"}],
-        ]}
+        ]
+        # Set active currency buttons (only for currencies with balance set)
+        _active_btns = []
+        for _c in ("idr", "usd", "usc"):
+            if _c in bals and _c != active:
+                _u = {"idr": "IDR", "usd": "USD", "usc": "USDc"}[_c]
+                _active_btns.append({"text": f"✅ {_u}", "callback_data": f"bal:active:{_c}"})
+        if _active_btns:
+            kb_rows.append(_active_btns)
+        kb_rows.append([{"text": "🗑️ Delete balance", "callback_data": "bal:del"}])
+        kb = {"inline_keyboard": kb_rows}
         return ("\n".join(lines), kb)
     if cmd == "/set_risk":
         # /set_risk 2  -> max 2% risk per trade
@@ -1182,7 +1205,11 @@ try:
                     continue
                 text = (m.get("text") or "").strip()
                 if not text.startswith("/"):
-                    continue
+                    # Allow plain numbers when waiting for balance amount
+                    _st_chk = load_state()
+                    if not _st_chk.get("_pending_balance_cur"):
+                        continue
+                    # Fall through to handle() for pending balance input
                 cmd = text.split()[0].split("@")[0].lower()
                 if cmd == "/chart":
                     send_chart(CHAT_ID)  # B40: unified
