@@ -107,7 +107,9 @@ cp .env.example .env
 `/alert_status` — status of all three
 
 **Info & management:**
-`/check` `/chart` `/trend` `/history` `/set_balance`
+`/menu` — interactive button menu (categorized)
+`/check` `/chart` `/trend` `/history`
+`/set_balance` `/set_risk` `/set_lot` `/lot_calc`
 `/skip_trade` `/close_trade` `/cancel_trade` `/reset_trade`
 
 ## License

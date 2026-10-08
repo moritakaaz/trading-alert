@@ -630,7 +630,7 @@ def build_menu(section="main"):
             [{"text": "⚖️ Risk", "callback_data": "menu:risk"},
              {"text": "🔧 Trade", "callback_data": "menu:trade"}],
         ]}
-        return kb, "🤖 <b>Menu</b> — pilih kategori:"
+        return kb, "🤖 <b>Menu</b> — choose a category:"
 
 def handle(text):
     cmd = text.strip().split()[0].split("@")[0].lower()
