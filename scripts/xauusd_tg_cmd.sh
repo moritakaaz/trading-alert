@@ -1190,7 +1190,11 @@ try:
                     continue
                 reply = handle(text)
                 if reply:
-                    if reply.startswith("MENU:"):
+                    if isinstance(reply, tuple):
+                        # (text, keyboard) tuple - e.g. /set_balance currency picker
+                        _txt, _kb = reply
+                        tg_send(CHAT_ID, _txt, keyboard=_kb)
+                    elif reply.startswith("MENU:"):
                         # v2.4: interactive menu - send with keyboard
                         _section = reply.split(":", 1)[1]
                         _kb, _txt = build_menu(_section)

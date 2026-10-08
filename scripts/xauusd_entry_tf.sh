@@ -1197,8 +1197,24 @@ price = int(round(sig_bar[4]))  # entry reference = signal bar close, whole numb
 _modal = st.get("modal") or {"amount": 600, "currency": "usc"}
 m_amount = float(_modal.get("amount") or 600)
 _m_cur = (_modal.get("currency") or "usc").lower()
-# USD/IDR rate (configurable via state, default 16000)
-_usd_idr = float(st.get("usd_idr_rate") or 16000)
+# USD/IDR live rate (cached 1h, fallback 16000)
+def _get_usd_idr():
+    try:
+        _cache = st.get("_usd_idr_cache") or {}
+        import time as _t
+        if _t.time() - _cache.get("ts", 0) < 3600 and _cache.get("rate"):
+            return float(_cache["rate"])
+        import urllib.request as _ur, json as _js
+        _req = _ur.Request("https://open.er-api.com/v6/latest/USD",
+                          headers={"User-Agent": "Mozilla/5.0"})
+        _resp = _ur.urlopen(_req, timeout=10)
+        _data = _js.loads(_resp.read().decode())
+        _rate = float(_data["rates"]["IDR"])
+        st["_usd_idr_cache"] = {"ts": _t.time(), "rate": _rate}
+        return _rate
+    except Exception:
+        return 16000.0
+_usd_idr = _get_usd_idr()
 if _m_cur == "idr":
     m_unit = "IDR"
     _risk_conv = _usd_idr / 100.0  # USC -> IDR
