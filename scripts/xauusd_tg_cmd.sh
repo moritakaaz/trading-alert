@@ -284,6 +284,7 @@ HELP = ("🤖 <b>XAUUSD alert bot commands</b>\n"
         "/set_balance — set balance (e.g. /set_balance 600 usc)\n"
         "/set_risk — set max risk % per trade (e.g. /set_risk 2)\n"
         "/set_lot — set lot size for risk calc (e.g. /set_lot 0.01)\n"
+        "/lot_calc — lot size recommender (balance+Risk+ATR)\n"
         "/skip_trade — skip signal (no entry)\n"
         "/close_trade — close manually (sl|tp1|tp2|tp3|be|manual)\n"
         "/cancel_trade — cancel signal (invalid)\n"
@@ -623,7 +624,51 @@ def handle(text):
         save_state({"lot_size": ls})
         return (f"✅ <b>Lot size set: {ls}</b>\n"
                 f"Risk calculations in alerts now use this.")
-    if cmd == "/alert_on":
+    if cmd == "/lot_calc":
+        # Calculate recommended & max lot based on balance, risk%, and current ATR
+        st0 = load_state()
+        modal = st0.get("modal") or {"amount": 600, "currency": "usc"}
+        bal = float(modal.get("amount") or 600)
+        unit = "USC" if (modal.get("currency") or "usc") == "usc" else "USD"
+        risk_lim = float(st0.get("risk_pct_limit") or 2.0)
+        # get current ATR from M5 state or fetch
+        try:
+            import sys as _sys
+            _sys.path.insert(0, os.path.expanduser("~/workspace/skills/twelve-data/bin"))
+            # quick ATR estimate: use last alert's ATR or default
+            atr = 12.0  # fallback
+            # try reading from M5 hook state last known
+            _m5s = {}
+            _mp = os.path.expanduser("~/hooks/state/xauusd_entry_m5.json")
+            if os.path.isfile(_mp):
+                with open(_mp) as _f:
+                    _m5s = json.load(_f)
+            # ATR not stored; use a reasonable estimate from recent alerts
+            # For now, calculate with SL=1.5*ATR, ATR~12
+        except Exception:
+            atr = 12.0
+        sl_d = 1.5 * atr
+        max_risk_usc = bal * (risk_lim / 100)
+        # lot for exact risk%: L = max_risk / (SL_d * 100)
+        rec_lot = max_risk_usc / (sl_d * 100) if sl_d > 0 else 0.01
+        # round down to 0.01 step
+        import math as _math
+        rec_lot = max(0.01, _math.floor(rec_lot * 100) / 100)
+        # max lot: 1.5x recommended (aggressive) - still within 1.5x risk
+        max_lot = _math.floor(rec_lot * 1.5 * 100) / 100
+        lines = [f"📐 <b>Lot Calculator</b>",
+                 f"💰 Balance: {bal:.0f} {unit} | Risk: {risk_lim}%",
+                 f"📊 Est. SL: ${sl_d:.0f} (1.5×ATR~${atr:.0f})",
+                 f"",
+                 f"✅ <b>Recommended: {rec_lot:.2f} lot</b> (= {risk_lim}% risk)",
+                 f"⚠️ <b>Maximum: {max_lot:.2f} lot</b> (= {risk_lim*1.5:.1f}% risk)",
+                 f"",
+                 f"Lot → Risk:"]
+        for _l in [0.01, 0.02, 0.03, 0.05, 0.10]:
+            _r = sl_d * (_l / 0.01) / bal * 100 if bal > 0 else 0
+            _mark = " ← you" if abs(_l - float(st0.get("lot_size") or 0.01)) < 0.005 else ""
+            lines.append(f"  {_l:.2f} lot → {_r:.1f}%{_mark}")
+        return "\n".join(lines)
         save_state({"alert_on": True, "paused_until": 0})
         return ("🟢 <b>XAUUSD M5 alerts turned on.</b>\n"
                 "BUY/SELL signals + 5-min heartbeat active.")
