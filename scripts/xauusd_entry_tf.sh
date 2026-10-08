@@ -1048,8 +1048,19 @@ _modal = st.get("modal") or {"amount": 600, "currency": "usc"}
 m_amount = float(_modal.get("amount") or 600)
 m_unit = "USC" if (_modal.get("currency") or "usc") == "usc" else "USD"
 # v2.4: user-configurable risk % limit and lot size (via /set_risk, /set_lot)
-_risk_limit = float(st.get("risk_pct_limit") or 2.0)
-_lot_size = float(st.get("lot_size") or 0.01)
+# Stored in M5 state (global); M1/M15 read from there.
+def _global_setting(key, default):
+    v = st.get(key)
+    if v is not None:
+        return v
+    try:
+        with open(os.path.expanduser("~/hooks/state/xauusd_entry_m5.json")) as _f:
+            _gs = json.load(_f)
+            return _gs.get(key, default)
+    except Exception:
+        return default
+_risk_limit = float(_global_setting("risk_pct_limit", 2.0))
+_lot_size = float(_global_setting("lot_size", 0.01))
 # risk scales with lot: at 0.01 lot, $1 = 1 unit; at 0.02 lot, $1 = 2 units, etc.
 _lot_mult = _lot_size / 0.01
 risk_usc = sl_d * _lot_mult

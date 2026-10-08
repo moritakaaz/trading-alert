@@ -603,21 +603,6 @@ def handle(text):
         if pct <= 0 or pct > 100:
             return "❌ Percent must be between 0 and 100."
         save_state({"risk_pct_limit": pct})
-        # also set for M1/M15 states (global setting)
-        for _tf in ("m1", "m15"):
-            try:
-                _p = os.path.expanduser(f"~/hooks/state/xauusd_entry_{_tf}.json")
-                _s = {}
-                if os.path.isfile(_p):
-                    with open(_p) as _f:
-                        _s = json.load(_f)
-                _s["risk_pct_limit"] = pct
-                _tmp = _p + ".tmp"
-                with open(_tmp, "w") as _f:
-                    json.dump(_s, _f)
-                os.replace(_tmp, _p)
-            except Exception:
-                pass
         return (f"✅ <b>Max risk set: {pct}%</b> per trade\n"
                 f"Alerts will warn when a signal exceeds this.")
     if cmd == "/set_lot":
@@ -636,20 +621,6 @@ def handle(text):
         if ls < 0.01 or ls > 100:
             return "❌ Lot size must be between 0.01 and 100."
         save_state({"lot_size": ls})
-        for _tf in ("m1", "m15"):
-            try:
-                _p = os.path.expanduser(f"~/hooks/state/xauusd_entry_{_tf}.json")
-                _s = {}
-                if os.path.isfile(_p):
-                    with open(_p) as _f:
-                        _s = json.load(_f)
-                _s["lot_size"] = ls
-                _tmp = _p + ".tmp"
-                with open(_tmp, "w") as _f:
-                    json.dump(_s, _f)
-                os.replace(_tmp, _p)
-            except Exception:
-                pass
         return (f"✅ <b>Lot size set: {ls}</b>\n"
                 f"Risk calculations in alerts now use this.")
     if cmd == "/alert_on":
