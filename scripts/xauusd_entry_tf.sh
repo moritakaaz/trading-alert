@@ -176,10 +176,41 @@ def tg_send_photo_only(text, photo_path, silent=False, keyboard=None):
             _args += ["-F", "disable_notification=true"]
         if keyboard:
             _args += ["-F", "reply_markup=" + json.dumps(keyboard, separators=(",", ":"))]
-        r = _curl_noleak(base + "/sendPhoto", _args, timeout=30)
-        ok = b'"ok":true' in (r.stdout or b"")
-        log(HOOK_ID, "tg-photo-sent" if ok else "tg-fail:sendPhoto-failed")
-        return ok
+        # Retry once on failure, then fall back to text-only
+        ok = False
+        for attempt in range(2):
+            try:
+                r = _curl_noleak(base + "/sendPhoto", _args, timeout=30)
+                if b'"ok":true' in (r.stdout or b""):
+                    ok = True
+                    break
+            except Exception:
+                pass
+            if attempt == 0:
+                time.sleep(3)
+        if ok:
+            log(HOOK_ID, "tg-photo-sent")
+            return True
+        # Fallback: send text-only so the alert is not lost
+        log(HOOK_ID, "tg-fail:sendPhoto-failed-2x, trying text fallback")
+        try:
+            _targs = ["-s", "-m", "25",
+                      "--data-urlencode", "chat_id=" + cid,
+                      "--data-urlencode", "text=" + esc(text[:4096]),
+                      "--data-urlencode", "parse_mode=HTML"]
+            if silent:
+                _targs += ["--data-urlencode", "disable_notification=true"]
+            if keyboard:
+                _targs += ["--data-urlencode",
+                           "reply_markup=" + json.dumps(keyboard, separators=(",", ":"))]
+            r = _curl_noleak(base + "/sendMessage", _targs, timeout=30)
+            if b'"ok":true' in (r.stdout or b""):
+                log(HOOK_ID, "tg-text-fallback-sent")
+                return True
+        except Exception:
+            pass
+        log(HOOK_ID, "tg-fail:photo-and-text-failed")
+        return False
     except Exception as ex:
         log(HOOK_ID, f"tg-fail:{str(ex)[:60]}")
         return False
