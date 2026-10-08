@@ -864,6 +864,7 @@ def handle(text):
             _mark = " ← you" if abs(_l - float(st0.get("lot_size") or 0.01)) < 0.005 else ""
             lines.append(f"  {_l:.2f} lot → {_r:.1f}%{_mark}")
         return "\n".join(lines)
+    if cmd in ("/alert_on", "/alert_on_m5"):
         save_state({"alert_on": True, "paused_until": 0})
         return ("🟢 <b>XAUUSD M5 alerts turned on.</b>\n"
                 "BUY/SELL signals + 5-min heartbeat active.")
@@ -883,7 +884,16 @@ def handle(text):
         return (f"{_e} <b>XAUUSD {_tf.upper()} alerts turned {_w}.</b>\n"
                 f"Send /alert_{'off' if _turn_on else 'on'}_{_tf} to turn them "
                 f"{'off' if _turn_on else 'on'} again.")
-    if cmd in ("/alert_status", "/check"):
+    if cmd == "/alert_status":
+        # concise: TF on/off only
+        _lines = ["🤖 <b>XAUUSD alerts</b>"]
+        for _tf in ("m1", "m5", "m15"):
+            _s = load_tf_state(_tf)
+            _on = _s.get("alert_on", True)
+            _e = "🟢" if _on else "🔴"
+            _lines.append(f"{_e} {_tf.upper()}: {'ON' if _on else 'OFF'}")
+        return "\n".join(_lines)
+    if cmd == "/check":
         return status_text()
     if cmd == "/history":
         return "HISTORY:0"  # special marker, handled in poller loop with pagination
