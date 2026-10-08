@@ -1359,8 +1359,8 @@ if os.environ.get("HATCH_HOOK_DRY_RUN") != "1":
         log(HOOK_ID, f"journal-fail:{str(ex)[:60]}")
 log(HOOK_ID, f"wake-{sig.lower()}")
 # push to Telegram (direct, reliable) in addition to the side-chat worker wake
+# full message as photo caption (single message, not split)
 tg_send(msg, photo=chart_path,
-        caption=f"📊 XAUUSD {TF_UP} Chart — {sig} @ ~${price}",
         keyboard=ALERT_KB)
 out("wake", f"{HOOK_ID}-{sig.lower()}",
     {"signal": sig, "price": price, "bar_time_utc": bar_iso,
