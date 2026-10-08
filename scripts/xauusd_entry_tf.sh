@@ -149,9 +149,9 @@ def _curl_noleak(url, args, timeout=30):
         except Exception:
             pass
 
-def tg_send_photo_only(text, photo_path, silent=False):
+def tg_send_photo_only(text, photo_path, silent=False, keyboard=None):
     """Send photo with text as caption in ONE message.
-    For setup watch (short text <1024 chars)."""
+    For setup watch and entry (text <1024 chars)."""
     try:
         if os.environ.get("HATCH_HOOK_DRY_RUN") == "1":
             return True
@@ -174,6 +174,8 @@ def tg_send_photo_only(text, photo_path, silent=False):
                  "-F", "parse_mode=HTML"]
         if silent:
             _args += ["-F", "disable_notification=true"]
+        if keyboard:
+            _args += ["-F", "reply_markup=" + json.dumps(keyboard, separators=(",", ":"))]
         r = _curl_noleak(base + "/sendPhoto", _args, timeout=30)
         ok = b'"ok":true' in (r.stdout or b"")
         log(HOOK_ID, "tg-photo-sent" if ok else "tg-fail:sendPhoto-failed")
@@ -1482,8 +1484,27 @@ if os.environ.get("HATCH_HOOK_DRY_RUN") != "1":
         log(HOOK_ID, f"journal-fail:{str(ex)[:60]}")
 log(HOOK_ID, f"wake-{sig.lower()}")
 # push to Telegram (direct, reliable) in addition to the side-chat worker wake
-# full message as photo caption (single message, not split)
-_tg_ok = tg_send(msg, photo=chart_path,
+# SINGLE MESSAGE: photo with condensed caption (fits 1024 char limit)
+# Build condensed caption with key info only
+_cap_lines = [
+    f"🚨 ENTRY XAUUSD ({TF_UP}): {dir_emoji} {sig}",
+    f"📐 {pattern['kind']}" + (" + neckline break" if pattern['kind'] in ("DOUBLE TOP", "DOUBLE BOTTOM") else " (H1)") + (f" · ⭐ {pattern.get('grade','?')} ({pattern.get('score','?')}/100)" if pattern.get('grade') else ""),
+    "",
+    f"🎯 Entry: ${price}",
+    f"🛑 SL: ${sl_px} (${sl_d})",
+    f"🎯 TP1: ${tp1_px} (${tp1_d}, 1R) → SL to BE",
+    f"🎯 TP2: ${tp2_px} (${tp2_d}, 1.5R)",
+    f"🎯 TP3: ${tp3_px} (${tp3_d}, 2R)",
+    "",
+    f"⚖️ Risk: ~{risk_usc:.0f} {m_unit} ({risk_pct:.1f}%)",
+]
+if risk_pct > _risk_limit:
+    _cap_lines.append(f"⚠️ RISK {risk_pct:.1f}% (>{_risk_limit}%) — consider skipping")
+_cap_lines.append("")
+_cap_lines.append("Not financial advice. [strat v2.5]")
+_caption = "\n".join(_cap_lines)
+# Send as single photo+caption message with keyboard
+_tg_ok = tg_send_photo_only(_caption, chart_path, silent=False,
         keyboard=ALERT_KB(TF))
 # B31: save dedupe markers ONLY after successful send.
 # If tg_send failed, don't save — signal will be retried next poll.
