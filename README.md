@@ -143,6 +143,16 @@ cp .env.example .env
 `/set_balance` `/set_risk` `/set_lot` `/lot_calc`
 `/skip_trade` `/close_trade` `/cancel_trade` `/reset_trade`
 
+## Reliability (P0-P3 fixes, Oct 2026)
+
+All 57 findings from the code review have been addressed:
+- **P0**: Alert text/chart delivery, Setup Watch accuracy, per-TF controls, dedupe safety
+- **P1**: Price display, version consistency, scoreboard accuracy, retry logic, token security
+- **P2**: Code cleanup, shared modules, documentation sync
+- **P3**: Testable signal module (`signals.py`) with 8 regression tests, log rotation
+
+**Language policy:** All user-facing text (alerts, commands, README) is English only.
+
 ## License
 
 MIT — use, modify, and share freely. The risk is yours.

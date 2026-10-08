@@ -1068,11 +1068,11 @@ if sig is None:
                     _touched = _forming[2] >= _touch_neck  # high touched/broke neckline
                 if _touched:
                     _touch_msg = (
-                        f"⚠️ NECKLINE TERSENTUH (belum close) — {_setup_sig} ${_touch_neck:.2f}\n"
-                        f"Harga menyentuh neckline di tengah candle. "
-                        f"ENTRY hanya jika candle {TF_UP} TUTUP "
-                        f"{'di bawah' if _setup_sig == 'SELL' else 'di atas'} ${_touch_neck:.2f} "
-                        f"DAN berwarna {'merah' if _setup_sig == 'SELL' else 'hijau'}."
+                        f"⚠️ NECKLINE TOUCHED (not closed) — {_setup_sig} ${_touch_neck:.2f}\n"
+                        f"Price touched the neckline mid-candle. "
+                        f"ENTRY only if the {TF_UP} candle CLOSES "
+                        f"{'below' if _setup_sig == 'SELL' else 'above'} ${_touch_neck:.2f} "
+                        f"AND is {'red' if _setup_sig == 'SELL' else 'green'}."
                     )
                     tg_send(_touch_msg, silent=False)
                     save_state_keys({"touch_p2_t": _touch_p2t})
@@ -1103,10 +1103,10 @@ if sig is None:
                 f" · ⭐ Grade {_setup_pat.get('grade','?')} ({_setup_pat.get('score','?')}/100)\n"
                 f"💰 Current: ${_cur:.2f} (${_dist:.2f} from neckline)\n"
                 f"👀 Standby — NOT an entry signal.\n"
-                f"Entry dikonfirmasi HANYA jika candle {TF_UP} TUTUP "
-                f"{'di bawah' if _setup_sig == 'SELL' else 'di atas'} ${_neck:.2f} "
-                f"DAN berwarna {'merah' if _setup_sig == 'SELL' else 'hijau'}. "
-                f"Stop order bisa terisi saat harga hanya menyentuh level (sebelum close).\n"
+                f"Entry confirmed ONLY if the {TF_UP} candle CLOSES "
+                f"{'below' if _setup_sig == 'SELL' else 'above'} ${_neck:.2f} "
+                f"AND is {'red' if _setup_sig == 'SELL' else 'green'}. "
+                f"A stop order can fill on a mere touch of the level (before close).\n"
                 f"🎯 Entry ${_neck:.2f} · 🛑 SL ${_sl} · TP1 ${_t1} · TP2 ${_t2} · TP3 ${_t3}\n"
                 f"\n🕐 {_wib} WIB [setup v2.5]"
             )
