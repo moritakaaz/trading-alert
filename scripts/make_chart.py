@@ -19,7 +19,24 @@ def main():
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    bars = d["bars"][-72:]
+    # B18: dynamic bar count — ensure p1 is visible (max 72 default,
+    # or p1-to-signal distance + 10)
+    _all_bars = d["bars"]
+    _n_bars = 72
+    try:
+        _pat = d.get("pattern") or {}
+        _p1_t = _pat.get("p1_t")
+        _sig_t = d.get("sig_t")
+        if _p1_t and _sig_t:
+            # find indices
+            _bts = [b["t"] for b in _all_bars]
+            _i1 = min(range(len(_bts)), key=lambda i: abs(_bts[i] - _p1_t))
+            _i2 = min(range(len(_bts)), key=lambda i: abs(_bts[i] - _sig_t))
+            _dist = abs(_i2 - _i1) + 10
+            _n_bars = max(72, _dist)
+    except Exception:
+        pass
+    bars = _all_bars[-_n_bars:]
     sig = d["signal"]  # "BUY", "SELL", or "NOW" (live chart without trade levels)
     entry = d["entry"]
     is_now = (sig == "NOW")
@@ -78,7 +95,6 @@ def main():
     # v2.4: robust y-range — use 2nd/98th percentile of candle range to avoid
     # a single spike squishing the whole chart (was min/max, too fragile for M1).
     # Key levels (neck/SL/TP) still expand the range if outside.
-    import statistics
     _los = sorted(lows)
     _his = sorted(highs)
     _n = len(_los)

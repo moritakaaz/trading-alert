@@ -98,8 +98,28 @@ def main():
     if not os.path.exists(JPATH):
         print("no journal yet"); return
     # Fetch price data FIRST (outside lock — don't hold lock during network).
+    # B47: compute needed bars from oldest open alert (not fixed 1500)
     try:
-        bars = td_m5(1500)
+        import csv as _csv
+        _oldest = None
+        with open(JPATH) as _jf:
+            for _r in _csv.DictReader(_jf):
+                if _r.get("status") == "open" and _r.get("alert_time_utc"):
+                    try:
+                        _t = datetime.datetime.strptime(
+                            _r["alert_time_utc"], "%Y-%m-%dT%H:%M:%SZ").replace(
+                            tzinfo=datetime.timezone.utc).timestamp()
+                        if _oldest is None or _t < _oldest:
+                            _oldest = _t
+                    except Exception:
+                        pass
+        if _oldest:
+            # bars needed: from oldest alert to now, +20% margin, min 1500
+            _need = int((time.time() - _oldest) / 300 * 1.2) + 10
+            _n = max(1500, min(_need, 8000))  # cap at 8000
+        else:
+            _n = 1500
+        bars = td_m5(_n)
     except Exception as e:
         print(f"price fetch failed: {e}"); return
     now = time.time()

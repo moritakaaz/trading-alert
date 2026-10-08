@@ -41,11 +41,20 @@ def log(msg, reason):
           file=sys.stderr)
 
 def tg_api(method, params=None, timeout=25):
+    # B38: catch HTTPError so one bad API call doesn't kill the whole poll
     tok, _ = tg_creds()
     url = f"https://api.telegram.org/bot{tok}/{method}"
     data = urllib.parse.urlencode(params or {}).encode() if params else None
     req = urllib.request.Request(url, data=data, headers={"User-Agent": "Mozilla/5.0"})
-    return json.load(urllib.request.urlopen(req, timeout=timeout))
+    try:
+        return json.load(urllib.request.urlopen(req, timeout=timeout))
+    except urllib.error.HTTPError as e:
+        try:
+            body = e.read().decode()[:200]
+        except Exception:
+            body = ""
+        log("xauusd-tg-cmd", f"tg-http-error:{method}:{e.code}:{body[:80]}")
+        return {"ok": False, "error_code": e.code, "description": body}
 
 def tg_send(chat_id, text, keyboard=None):
     if DRY:
@@ -244,8 +253,8 @@ def set_offset(n):
         json.dump(n, open(OFFSET_FILE, "w"))
 
 def status_text():
+    # B28: per-TF status shown below; M5-only 'on' var removed (unused)
     st = load_state()
-    on = st.get("alert_on", True)
     WIB = datetime.timezone(datetime.timedelta(hours=7))
     last_poll, n_today = "-", 0
     try:
@@ -302,6 +311,7 @@ def status_text():
             f"🚨 Last signal: {esc(last_sig)}{pos_line}")
 
 HELP = ("🤖 <b>XAUUSD alert bot commands</b>\n"
+        "/menu — interactive button menu\n"
         "/alert_on_m5 — turn M5 alerts on\n"
         "/alert_off_m5 — turn M5 alerts off\n"
         "/alert_on_m1 — turn M1 alerts on\n"
@@ -503,6 +513,8 @@ def trend_text():
     h1_trend = "BULLISH" if h1_d > 0 else "BEARISH"
     m15_trend = "BULLISH" if m15_d > 0 else "BEARISH"
     now_px = h1c[-1]
+    # B08: this is last CLOSED H1 bar, not live price
+    _h1_t = datetime.datetime.fromtimestamp(h1[-1][0], datetime.timezone.utc).astimezone(WIB).strftime("%H:%M")
     e1 = "🟢" if h1_trend == "BULLISH" else "🔴"
     em = "🟢" if m15_trend == "BULLISH" else "🔴"
     # B07 (P1): trend filter was REMOVED in v2.1 — show as info only
@@ -510,7 +522,7 @@ def trend_text():
             f"{e1} <b>H1: {h1_trend}</b> (EMA20/50)\n"
             f"{em} <b>M15: {m15_trend}</b> (EMA20/50)\n"
             f"   → info only, does not filter signals\n\n"
-            f"💰 Price: <b>${now_px:,.2f}</b>\n"
+            f"💰 Last H1 close: <b>${now_px:,.2f}</b> ({_h1_t} WIB)\n"
             f"[strat v2.5]")
 
 def last_signal():
@@ -634,16 +646,20 @@ def handle_chart():
         return None, "❌ Failed to render chart."
     return chart_path, cap
 
+def send_chart(chat_id):
+    """B40: unified chart sender — single place for /chart logic."""
+    photo, cap_or_err = handle_chart()
+    if photo:
+        tg_send_photo(chat_id, photo, cap_or_err)
+    else:
+        tg_send(chat_id, cap_or_err)
+
 def handle_callback(data):
     # inline-keyboard taps from alert messages; mirrors the / commands
     _, chat_id = tg_creds()
     # B09: chart callback may include TF (e.g. "chart:m1")
     if data == "chart" or data.startswith("chart:"):
-        photo, cap_or_err = handle_chart()
-        if photo:
-            tg_send_photo(chat_id, photo, cap_or_err)
-        else:
-            tg_send(chat_id, cap_or_err)
+        send_chart(chat_id)  # B40: unified
     elif data == "status":
         tg_send(chat_id, status_text())
     elif data.startswith("hist:"):
@@ -703,11 +719,7 @@ def handle_callback(data):
         # execute a command from menu button
         _cmd = data.split(":", 1)[1]
         if _cmd == "/chart":
-            photo, cap_or_err = handle_chart()
-            if photo:
-                tg_send_photo(chat_id, photo, cap_or_err)
-            else:
-                tg_send(chat_id, cap_or_err)
+            send_chart(chat_id)  # B40: unified
         else:
             reply = handle(_cmd)
             if reply:
@@ -1087,11 +1099,7 @@ try:
                     continue
                 cmd = text.split()[0].split("@")[0].lower()
                 if cmd == "/chart":
-                    photo, cap_or_err = handle_chart()
-                    if photo:
-                        tg_send_photo(CHAT_ID, photo, cap_or_err)
-                    else:
-                        tg_send(CHAT_ID, cap_or_err)
+                    send_chart(CHAT_ID)  # B40: unified
                     log("xauusd-tg-cmd", "handled:/chart")
                     continue
                 reply = handle(text)

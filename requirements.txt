@@ -2,9 +2,14 @@
 # Everything else used by this repo is Python standard library.
 #
 # Install:  pip install -r requirements.txt
+# Python: >=3.8 (uses f-strings, datetime.timezone, fcntl)
 
 matplotlib>=3.6
+
+# Dev/test dependencies (optional):
+# pytest>=7.0  # for tests/test_*.py (B43)
 
 # NOTE: data/*.py import `dynamic_credentials` from a Hatch-specific path
 # (/opt/hatch/skills/skill-creator/bin). Outside that environment, replace
 # those calls with your API key from .env (see README.md "Installation").
+# B21 tracks removing this dependency (read keys from config instead).

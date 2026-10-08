@@ -18,7 +18,7 @@ Three independent alert systems: **M1** (1-min poll), **M5** (5-min poll),
 | Component | Detail |
 |---|---|
 | Trigger 1 (priority) | Double top/bottom on signal TF: M5 fractal peaks/valleys (N=2), \|p1-p2\| ≤ 0.25×ATR(H1), 5–50 bars apart, intervening extreme ≥3 bars from each side, no higher-high/lower-low between peaks (clean check), confirmation = close beyond neckline with right color. p1 = nearest peak forming a valid pattern |
-| Trigger 2 | Donchian(48) breakout on completed H1 bars, evaluated on signal-TF close (no EMA filter) |
+| Trigger 2 | Donchian(48) breakout on completed H1 bars, evaluated on signal-TF close (no EMA filter). Note: Donchian does NOT require candle-color confirmation (unlike double top/bottom) |
 | Quality score | Every pattern scored 0-100 (Grade A/B/C): peak match 25 + RSI divergence 20 + height 15 + symmetry 10 + prior trend 15. Shown in alerts, informational only |
 | Stop loss | 1.5 × ATR(14) H1 |
 | Take profit | TP1 1R → SL to breakeven, TP2 1.5R, TP3 2R (runner) |
@@ -96,11 +96,30 @@ cp .env.example .env
    Optional: [Finnhub](https://finnhub.io) (news), [FRED](https://fred.stlouisfed.org) (calendar).
 3. Adjust the state/log paths in the scripts to your environment
    (defaults point to `~/hooks/state/` and `~/hooks/logs/`).
-4. Run the alert pollers via cron/systemd:
-   - `scripts/xauusd_entry_m1.sh` every 1 minute (M1)
-   - `scripts/xauusd_entry_m5tf.sh` every 5 minutes (M5)
-   - `scripts/xauusd_entry_m15.sh` every 5 minutes (M15)
-   Each is independent — enable only the timeframes you want.
+4. Run the alert pollers via cron (example crontab):
+   ```cron
+   # M1 entry alerts (1-min poll)
+   * * * * * /path/to/scripts/xauusd_entry_m1.sh
+   # M5 entry alerts (5-min poll)
+   */5 * * * * /path/to/scripts/xauusd_entry_m5tf.sh
+   # M15 entry alerts (5-min poll)
+   */5 * * * * /path/to/scripts/xauusd_entry_m15.sh
+   # Watchdog (dead man's switch, 10-min)
+   */10 * * * * python3 /path/to/scripts/xauusd_watchdog.py
+   # Scoreboard (daily P&L review, ~00:23 UTC)
+   23 0 * * * python3 /path/to/scripts/entry_scoreboard.py
+   # Telegram command handler (30s poll — use systemd or a loop)
+   * * * * * /path/to/scripts/xauusd_tg_cmd.sh
+   ```
+   Each timeframe is independent — enable only the ones you want.
+
+   **Environment variables** (or `.env` in repo root):
+   - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` (required)
+   - `TWELVE_DATA_API_KEY` (price feed)
+   - `FINNHUB_API_KEY` (news, optional)
+   - `FRED_API_KEY` (calendar, optional)
+   - `CHART_DIR` (chart output dir, default `~/workspace/trading-ea/charts`)
+   - `NEWS_MAX_AGE_HOURS` (default 12), `CALENDAR_WARN_MINUTES` (default 30)
 
 > Note: the scripts were built for a specific VM setup with a custom credential
 > pattern (`dynamic_credentials` surrogate). On other environments, replace the
@@ -109,14 +128,17 @@ cp .env.example .env
 ## Telegram Commands
 
 **Alerts (per timeframe, independent):**
-`/alert_on_m5 — M5 (default)
+`/alert_on_m5` `/alert_off_m5` — M5 (default; `/alert_on`/`/alert_off` also work)
 `/alert_on_m1` `/alert_off_m1` — M1
 `/alert_on_m15` `/alert_off_m15` — M15
-`/alert_status` — status of all three
+`/alert_status` — concise ON/OFF per TF
 
 **Info & management:**
 `/menu` — interactive button menu (categorized)
-`/check` `/chart` `/trend` `/history` (paginated, 10/page with Next/Prev)
+`/check` — full status + last signal + active position
+`/chart` — live chart + data
+`/trend` — H1 & M15 trend (info only, no filter)
+`/history` — signals + results (paginated, 10/page with Next/Prev)
 `/export_journal` — export journal CSV by day/week/month/year
 `/set_balance` `/set_risk` `/set_lot` `/lot_calc`
 `/skip_trade` `/close_trade` `/cancel_trade` `/reset_trade`

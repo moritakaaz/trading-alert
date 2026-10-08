@@ -18,7 +18,15 @@ import fcntl
 import datetime
 import subprocess
 
+# B34: shared market hours (single source of truth)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from marketHours import in_forex_hours
+except ImportError:
+    in_forex_hours = None
+
 STATE = os.path.expanduser("~/hooks/state/xauusd_entry_m5.json")
+WD_STATE = os.path.expanduser("~/hooks/state/watchdog_state.json")  # B35: watchdog dedupe in its own file
 LOG = os.path.expanduser("~/hooks/logs/xauusd-entry-m5.jsonl")
 DRY = os.environ.get("HATCH_HOOK_DRY_RUN") == "1"
 
@@ -75,10 +83,8 @@ def tg_send(text):
         log(f"tg-fail:{str(ex)[:60]}")
 
 
-def in_forex_hours(now):
-    # NOTE (2026-10-05): this duplicates the forex-hours gate in
-    # xauusd_entry_m5.sh (which uses numeric wd/hm). If either changes,
-    # update the other. Both use UTC (DST-immune).
+def _in_forex_hours_local(now):
+    # Fallback if marketHours import failed (kept in sync with marketHours.py)
     dt = datetime.datetime.fromtimestamp(now, datetime.timezone.utc)
     if dt.strftime("%H:%M") >= "21:00" and dt.strftime("%H:%M") < "22:00":
         return False  # daily break
@@ -92,6 +98,12 @@ def in_forex_hours(now):
     if wd == 4 and dt.hour >= 21:
         return False  # Friday after 21:00
     return True
+
+def _forex_hours(now):
+    # B34: prefer shared marketHours module
+    if in_forex_hours:
+        return in_forex_hours(now)
+    return _in_forex_hours_local(now)
 
 
 def check_tf(tf, now):
@@ -117,7 +129,7 @@ def check_tf(tf, now):
     # --- 1. heartbeat freshness ---
     # v2.5: check last_run (liveness), not last_heartbeat (message gate)
     last_hb = st.get("last_run", 0)
-    if in_forex_hours(now) and now - last_hb > 900:
+    if _forex_hours(now) and now - last_hb > 900:
         mins = int((now - last_hb) / 60)
         last_wd = st.get("watchdog_last_alert", 0)
         if now - last_wd > 3600:
@@ -211,9 +223,9 @@ def main():
         cmd_mtime = os.path.getmtime(cmd_log) if os.path.exists(cmd_log) else 0
         # tg-cmd polls every 30s, so >5 min without a log line = dead
         if now - cmd_mtime > 300:
-            # use M5 state for dedupe (shared watchdog timestamps)
+            # B35: dedupe in watchdog's own state file
             try:
-                with open(os.path.expanduser("~/hooks/state/xauusd_entry_m5.json")) as f:
+                with open(WD_STATE) as f:
                     st5 = json.load(f)
             except Exception:
                 st5 = {}
@@ -223,8 +235,7 @@ def main():
                     f"⚠️ <b>COMMAND HANDLER DOWN?</b>\n"
                     f"No activity for {int((now - cmd_mtime) / 60)} minutes.\n"
                     f"Telegram commands may not be responding.")
-                save_wd_ts(os.path.expanduser("~/hooks/state/xauusd_entry_m5.json"),
-                           "watchdog_last_cmd_alert", now)
+                save_wd_ts(WD_STATE, "watchdog_last_cmd_alert", now)
                 log("alert:cmd-handler-stale")
             else:
                 log("cmd-handler-stale:already-alerted")

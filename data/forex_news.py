@@ -28,8 +28,12 @@ def main():
         print(json.dumps({"error": f"request failed: {e}"})); sys.exit(1)
     if not isinstance(data, list):
         print(json.dumps({"error": str(data)[:200]})); sys.exit(1)
+    def _trunc(s, n=220):
+        # B50: ellipsis when truncated
+        s = s or ""
+        return s[:n] + ("..." if len(s) > n else "")
     out = [{"t": n.get("datetime"), "headline": n.get("headline"),
-            "summary": (n.get("summary") or "")[:220], "url": n.get("url")}
+            "summary": _trunc(n.get("summary")), "url": n.get("url")}
            for n in data[:a.limit]]
     print(json.dumps({"news": out}))
 
