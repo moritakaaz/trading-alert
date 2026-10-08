@@ -280,12 +280,13 @@ except Exception:
     pass
 
 # master on/off switch (toggled by !alert on/off on WA and /alert_on/off on TG)
+# v2.5: check is deferred until AFTER monitoring, so SL/TP monitoring
+# continues even when alerts are off (real positions still need tracking).
 try:
     _s0 = json.load(open(STATE_FILE))
 except Exception:
     _s0 = {}
-if not _s0.get("alert_on", True):
-    log(HOOK_ID, "alert-off"); out("silent", "alert-off")
+_alert_on = _s0.get("alert_on", True)
 
 def td_ohlc(interval, n):
     r = subprocess.run([TD_CLI, "--interval", interval, "--outputsize", str(n)],
@@ -964,6 +965,12 @@ def resolve_runner():
 # path), so with no new signal the open trade was never checked.
 _mon_active, _mon_closed = resolve_active_trade()
 resolve_runner()
+
+# v2.5: master switch check AFTER monitoring. SL/TP notifications continue
+# even when alerts are off (positions are real). New signals and heartbeat
+# are suppressed below when alert is off.
+if not _alert_on:
+    log(HOOK_ID, "alert-off"); out("silent", "alert-off")
 
 if sig is None:
     # v2.2: setup watch — pattern forming but not confirmed yet.
