@@ -717,21 +717,22 @@ def handle_callback(data):
         st0 = load_state()
         bals = st0.get("balances") or {}
         if _target == "all":
-            save_state({"balances": {"usc": 600},
-                       "modal": {"amount": 600, "currency": "usc"},
-                       "active_currency": "usc",
+            save_state({"balances": {},
+                       "modal": {"amount": 0, "currency": "usc"},
+                       "active_currency": None,
                        "_pending_balance_cur": None})
-            tg_send(chat_id, "🗑️ <b>All balances deleted.</b> Reset to default 600 USDc.")
+            tg_send(chat_id, "🗑️ <b>All balances deleted.</b>\n"
+                            "Use /set_balance to add a new one.")
         elif _target in bals:
             _u = {"idr": "IDR", "usd": "USD", "usc": "USDc"}[_target]
             del bals[_target]
-            # If deleted active, fall back to usc default
+            # If deleted active, clear it
             _active = st0.get("active_currency", "usc")
             if _active == _target:
-                _active = "usc"
-                _modal = {"amount": 600, "currency": "usc"}
+                _active = None
+                _modal = {"amount": 0, "currency": "usc"}
             else:
-                _modal = {"amount": bals.get(_active, 600), "currency": _active}
+                _modal = {"amount": bals.get(_active, 0), "currency": _active or "usc"}
             save_state({"balances": bals, "active_currency": _active,
                        "modal": _modal})
             tg_send(chat_id, f"🗑️ <b>{_u} balance deleted.</b>")
