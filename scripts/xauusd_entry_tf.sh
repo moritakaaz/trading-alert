@@ -286,6 +286,62 @@ if a1 <= 0:
 # neckline with the right color (touch-only rejected: a wick that closes
 # back means the level HELD — firing on it catches traps, not breakouts).
 # No lookahead: every bar referenced is closed at signal time.
+def rsi_series(closes, period=14):
+    # Wilder's RSI; returns list aligned with closes
+    n = len(closes)
+    out = [50.0] * n
+    if n <= period:
+        return out
+    gains = [0.0] * n
+    losses = [0.0] * n
+    for i in range(1, n):
+        d = closes[i] - closes[i-1]
+        gains[i] = d if d > 0 else 0.0
+        losses[i] = -d if d < 0 else 0.0
+    ag = sum(gains[1:period+1]) / period
+    al = sum(losses[1:period+1]) / period
+    out[period] = 100.0 if al <= 0 else 100.0 - 100.0 / (1.0 + ag / al)
+    for i in range(period+1, n):
+        ag = (ag * (period-1) + gains[i]) / period
+        al = (al * (period-1) + losses[i]) / period
+        out[i] = 100.0 if al <= 0 else 100.0 - 100.0 / (1.0 + ag / al)
+    return out
+
+def score_pattern(sig, p1, p2, xn, neck):
+    # v2.4: quality score 0-100 (adapted from Neblok's Double Tap).
+    # No volume for spot XAUUSD, so rescaled to 100 from 85 max.
+    # Peak match 25 + RSI divergence 20 + height 15 + symmetry 10 + prior trend 15.
+    H = [b[2] for b in closed_tf]
+    L = [b[3] for b in closed_tf]
+    C = [b[4] for b in closed_tf]
+    if sig == "SELL":
+        ext = max(H[p1], H[p2])
+        match = max(0.0, 1.0 - abs(H[p2]-H[p1]) / max(0.25*a1, 1e-9))
+    else:
+        ext = min(L[p1], L[p2])
+        match = max(0.0, 1.0 - abs(L[p2]-L[p1]) / max(0.25*a1, 1e-9))
+    s1 = 25.0 * match
+    r = rsi_series(C)
+    rsi_div = (r[p2] < r[p1]) if sig == "SELL" else (r[p2] > r[p1])
+    s2 = 20.0 if rsi_div else 0.0
+    h = abs(ext - neck)
+    s4 = 15.0 * min(1.0, h / max(3.0*a1, 1e-9))
+    l1, l2 = xn - p1, p2 - xn
+    sym = min(l1, l2) / max(max(l1, l2), 1)
+    s5 = 10.0 * sym
+    # prior trend: strong move into the pattern (look back 60 bars from p1)
+    lo_i = max(0, p1 - 60)
+    if sig == "SELL":
+        pre = min(L[lo_i:p1+1]) if lo_i < p1 else ext
+        prior = max(0.0, ext - pre)
+    else:
+        pre = max(H[lo_i:p1+1]) if lo_i < p1 else ext
+        prior = max(0.0, pre - ext)
+    s6 = 15.0 * min(1.0, prior / max(h, 1e-9))
+    score = int(round((s1+s2+s4+s5+s6) / 85.0 * 100.0))
+    grade = "A" if score >= 75 else ("B" if score >= 55 else "C")
+    return score, grade, rsi_div
+
 def detect_dtb():
     n = len(closed_tf)
     if n < 80 or a1 <= 0:
@@ -305,58 +361,172 @@ def detect_dtb():
     for p2 in range(max(2, k - 24), k):
         if not is_peak[p2]:
             continue
-        p1 = None
+        # v2.3: p1 = nearest peak that forms a VALID pattern (not just nearest).
+        # The old greedy-nearest missed real formations when a small intermediate
+        # peak sat between the two true tops.
+        p1, vlo, vi = None, None, None
         for q in range(p2 - 5, max(1, p2 - 50), -1):
-            if is_peak[q]:
-                p1 = q
-                break
+            if not is_peak[q]:
+                continue
+            if abs(H[p2] - H[q]) > 0.25 * a1:
+                continue
+            _seg = L[q + 1:p2]
+            if not _seg:
+                continue
+            _vlo = min(_seg)
+            if min(H[q], H[p2]) - _vlo < 0.5 * a1:
+                continue
+            _vi = q + 1 + _seg.index(_vlo)
+            if _vi - q < 3 or p2 - _vi < 3:
+                continue
+            p1, vlo, vi = q, _vlo, _vi
+            break
         if p1 is None:
             continue
-        if abs(H[p2] - H[p1]) > 0.25 * a1:
-            continue
-        seg = L[p1 + 1:p2]
-        if not seg:
-            continue
-        vlo = min(seg)
-        if min(H[p1], H[p2]) - vlo < 0.5 * a1:
-            continue
-        # the valley must sit well between the peaks (>=3 bars from each):
-        # rejects 1-2 bar wiggles but keeps real formations (backtest: sep>=3
-        # gives PF 1.18 at 0.93 trades/day; sep>=5 kills the edge, PF 0.88)
-        vi = p1 + 1 + seg.index(vlo)
-        if vi - p1 < 3 or p2 - vi < 3:
+        # v2.4 clean check: no higher high between the peaks (else it's not a clean M)
+        if max(H[p1+1:p2]) > max(H[p1], H[p2]) + 1e-9:
             continue
         if sc < vlo and sc < so:  # close below neckline + red
+            _score, _grade, _rsi_div = score_pattern("SELL", p1, p2, vi, vlo)
             return "SELL", {"kind": "DOUBLE TOP", "p1": H[p1],
                             "p2": H[p2], "neck": vlo,
-                            "p2_t": closed_tf[p2][0]}
+                            "p2_t": closed_tf[p2][0],
+                            "score": _score, "grade": _grade,
+                            "rsi_div": _rsi_div}
     # double bottoms -> BUY
     for p2 in range(max(2, k - 24), k):
         if not is_valley[p2]:
             continue
-        p1 = None
+        # v2.3: p1 = nearest valley that forms a VALID pattern
+        p1, vhi, pi = None, None, None
         for q in range(p2 - 5, max(1, p2 - 50), -1):
-            if is_valley[q]:
-                p1 = q
-                break
+            if not is_valley[q]:
+                continue
+            if abs(L[p2] - L[q]) > 0.25 * a1:
+                continue
+            _seg = H[q + 1:p2]
+            if not _seg:
+                continue
+            _vhi = max(_seg)
+            if _vhi - max(L[q], L[p2]) < 0.5 * a1:
+                continue
+            _pi = q + 1 + _seg.index(_vhi)
+            if _pi - q < 3 or p2 - _pi < 3:
+                continue
+            p1, vhi, pi = q, _vhi, _pi
+            break
         if p1 is None:
             continue
-        if abs(L[p2] - L[p1]) > 0.25 * a1:
-            continue
-        seg = H[p1 + 1:p2]
-        if not seg:
-            continue
-        vhi = max(seg)
-        if vhi - max(L[p1], L[p2]) < 0.5 * a1:
-            continue
-        # the peak must sit well between the valleys (>=3 bars from each)
-        pi = p1 + 1 + seg.index(vhi)
-        if pi - p1 < 3 or p2 - pi < 3:
+        # v2.4 clean check: no lower low between the valleys (else it's not a clean W)
+        if min(L[p1+1:p2]) < min(L[p1], L[p2]) - 1e-9:
             continue
         if sc > vhi and sc > so:  # close above neckline + green
+            _score, _grade, _rsi_div = score_pattern("BUY", p1, p2, pi, vhi)
             return "BUY", {"kind": "DOUBLE BOTTOM", "p1": L[p1],
                            "p2": L[p2], "neck": vhi,
-                           "p2_t": closed_tf[p2][0]}
+                           "p2_t": closed_tf[p2][0],
+                           "score": _score, "grade": _grade,
+                           "rsi_div": _rsi_div}
+    return None, None
+
+# v2.2: setup detector — pattern geometry complete but NO confirmation yet.
+# Fires once per pattern as an early "standby" warning before the entry signal.
+# Same geometry as detect_dtb; returns the most recent unconfirmed pattern.
+# v2.3: uses first-valid p1 (not greedy-nearest).
+def detect_setup():
+    n = len(closed_tf)
+    if n < 80 or a1 <= 0:
+        return None, None
+    H = [b[2] for b in closed_tf]
+    L = [b[3] for b in closed_tf]
+    is_peak = [False] * n
+    is_valley = [False] * n
+    for i in range(2, n - 2):
+        if H[i] > H[i-1] and H[i] > H[i-2] and H[i] > H[i+1] and H[i] > H[i+2]:
+            is_peak[i] = True
+        if L[i] < L[i-1] and L[i] < L[i-2] and L[i] < L[i+1] and L[i] < L[i+2]:
+            is_valley[i] = True
+    k = n - 1
+    so, sc = closed_tf[k][1], closed_tf[k][4]
+    best = None  # (p2, sig, pattern) — keep the most recent
+    # double tops forming -> potential SELL
+    for p2 in range(max(2, k - 24), k):
+        if not is_peak[p2]:
+            continue
+        # v2.3: first-valid p1
+        p1, vlo, vi = None, None, None
+        for q in range(p2 - 5, max(1, p2 - 50), -1):
+            if not is_peak[q]:
+                continue
+            if abs(H[p2] - H[q]) > 0.25 * a1:
+                continue
+            _seg = L[q + 1:p2]
+            if not _seg:
+                continue
+            _vlo = min(_seg)
+            if min(H[q], H[p2]) - _vlo < 0.5 * a1:
+                continue
+            _vi = q + 1 + _seg.index(_vlo)
+            if _vi - q < 3 or p2 - _vi < 3:
+                continue
+            p1, vlo, vi = q, _vlo, _vi
+            break
+        if p1 is None:
+            continue
+        # v2.4 clean check
+        if max(H[p1+1:p2]) > max(H[p1], H[p2]) + 1e-9:
+            continue
+        if sc < vlo and sc < so:
+            continue  # already confirmed -> real signal, not a setup
+        # only warn if price is near the neckline (within 0.5xATR) — far away = not actionable
+        if sc - vlo > 0.5 * a1:
+            continue
+        _score, _grade, _rsi_div = score_pattern("SELL", p1, p2, vi, vlo)
+        best = (p2, "SELL", {"kind": "DOUBLE TOP", "p1": H[p1],
+                             "p2": H[p2], "neck": vlo,
+                             "p2_t": closed_tf[p2][0],
+                             "score": _score, "grade": _grade,
+                             "rsi_div": _rsi_div})
+    # double bottoms forming -> potential BUY
+    for p2 in range(max(2, k - 24), k):
+        if not is_valley[p2]:
+            continue
+        # v2.3: first-valid p1
+        p1, vhi, pi = None, None, None
+        for q in range(p2 - 5, max(1, p2 - 50), -1):
+            if not is_valley[q]:
+                continue
+            if abs(L[p2] - L[q]) > 0.25 * a1:
+                continue
+            _seg = H[q + 1:p2]
+            if not _seg:
+                continue
+            _vhi = max(_seg)
+            if _vhi - max(L[q], L[p2]) < 0.5 * a1:
+                continue
+            _pi = q + 1 + _seg.index(_vhi)
+            if _pi - q < 3 or p2 - _pi < 3:
+                continue
+            p1, vhi, pi = q, _vhi, _pi
+            break
+        if p1 is None:
+            continue
+        # v2.4 clean check
+        if min(L[p1+1:p2]) < min(L[p1], L[p2]) - 1e-9:
+            continue
+        if sc > vhi and sc > so:
+            continue  # already confirmed -> real signal, not a setup
+        if vhi - sc > 0.5 * a1:
+            continue
+        if best is None or p2 > best[0]:
+            _score, _grade, _rsi_div = score_pattern("BUY", p1, p2, pi, vhi)
+            best = (p2, "BUY", {"kind": "DOUBLE BOTTOM", "p1": L[p1],
+                                "p2": L[p2], "neck": vhi,
+                                "p2_t": closed_tf[p2][0],
+                                "score": _score, "grade": _grade,
+                                "rsi_div": _rsi_div})
+    if best:
+        return best[1], best[2]
     return None, None
 
 sig, pattern = detect_dtb()
@@ -691,7 +861,65 @@ def resolve_runner():
     return not done
 
 if sig is None:
-    heartbeat_maybe("no-signal")
+    # v2.2: setup watch — pattern forming but not confirmed yet.
+    # Early "standby" alert so he can prepare before the entry signal.
+    _setup_sig, _setup_pat = detect_setup()
+    _active_chk, _ = resolve_active_trade()
+    _paused = st.get("paused_until", 0) > now
+    if (_setup_sig and not _paused and not _active_chk
+            and st.get("setup_p2_t") != _setup_pat.get("p2_t")):
+        try:
+            _neck = int(round(_setup_pat["neck"]))
+            _cur = int(round(sig_bar[4]))
+            _dist = abs(_cur - _neck)
+            _dir_emoji = "🟢" if _setup_sig == "BUY" else "🔴"
+            _wib = datetime.datetime.fromtimestamp(
+                sig_bar[0], datetime.timezone.utc).astimezone(WIB).strftime("%d %b %H:%M")
+            _setup_msg = (
+                f"⚠️ SETUP WATCH ({TF_UP}): potential {_setup_sig} forming\n"
+                f"📐 Pattern: {_setup_pat['kind']} (neckline ${_neck})"
+                f" · ⭐ Grade {_setup_pat.get('grade','?')} ({_setup_pat.get('score','?')}/100)\n"
+                f"💰 Current: ${_cur} (${_dist} from neckline)\n"
+                f"👀 Standby — NOT an entry signal.\n"
+                f"{'Entry triggers if a candle closes above' if _setup_sig == 'BUY' else 'Entry triggers if a candle closes below'} ${_neck}.\n"
+                f"\n🕐 {_wib} WIB [setup v2.4]"
+            )
+            # chart of the forming pattern
+            _chart_dir = os.path.expanduser("~/workspace/trading-ea/charts")
+            os.makedirs(_chart_dir, exist_ok=True)
+            _chart_path = os.path.join(_chart_dir, f"setup_{bar_iso}.png")
+            _chart_in = {
+                "bars": [{"t": b[0], "o": b[1], "h": b[2], "l": b[3], "c": b[4]}
+                         for b in closed_tf],
+                "pattern": {k: _setup_pat[k] for k in
+                            ("kind", "p1", "p2", "neck") if k in _setup_pat},
+                "signal": _setup_sig, "entry": _cur,
+                "sl": 0, "tp1": 0, "tp2": 0, "tp3": 0,
+                "bar_time_wib": _wib, "out": _chart_path,
+                "setup_mode": True,
+            }
+            _tmp_in = _chart_path + ".json"
+            json.dump(_chart_in, open(_tmp_in, "w"))
+            _r = subprocess.run(
+                [sys.executable, os.path.expanduser("~/hooks/scripts/make_chart.py"),
+                 _tmp_in], capture_output=True, text=True, timeout=60)
+            os.remove(_tmp_in)
+            _chart_url = None
+            if os.path.exists(_chart_path):
+                _chart_url = ("sandbox://workspace/trading-ea/charts/"
+                              + os.path.basename(_chart_path))
+            tg_send(_setup_msg, silent=False,
+                    photo=_chart_path if os.path.exists(_chart_path) else None)
+            save_state_keys({"setup_p2_t": _setup_pat.get("p2_t")})
+            log(HOOK_ID, f"wake-setup-{_setup_sig.lower()}")
+            out("wake", f"xauusd-setup-{_setup_sig.lower()}-{TF}",
+                {"message": _setup_msg,
+                 "chart": _chart_url} if _chart_url else {"message": _setup_msg})
+        except Exception as _ex:
+            log(HOOK_ID, f"setup-fail:{str(_ex)[:60]}")
+            heartbeat_maybe("no-signal")
+    else:
+        heartbeat_maybe("no-signal")
 
 if st.get("last_bar") == bar_iso:
     log(HOOK_ID, "dup"); out("silent", "already-alerted")
@@ -878,7 +1106,9 @@ except Exception as ex:
 lines = [f"🚨 ENTRY XAUUSD ({TF_UP}): {dir_emoji} {sig}",
          f"📐 Pattern: {pattern['kind']}" +
          (" + neckline break" if pattern['kind'] in ("DOUBLE TOP", "DOUBLE BOTTOM")
-          else " (H1 channel)"),
+          else " (H1 channel)") +
+         (f" · ⭐ Grade {pattern.get('grade','?')} ({pattern.get('score','?')}/100)"
+          if pattern.get('grade') else ""),
          "",
          f"🎯 Entry: ${price}",
          f"🛑 SL: ${sl_px} (${sl_d} from entry)",

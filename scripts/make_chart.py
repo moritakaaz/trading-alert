@@ -26,12 +26,16 @@ def main():
     # hist: True = closed/historical signal -> dimmed dashed lines + outcome label
     # entry_line: True = horizontal entry line (for /chart, where the signal
     #   bar is old); False = triangle marker on last bar (for fresh alerts)
+    # setup_mode: True = forming pattern, no SL/TP (standby alert, not an entry)
     is_hist = d.get("hist", False)
     entry_line = d.get("entry_line", False)
-    if not is_now:
+    is_setup = d.get("setup_mode", False)
+    if not is_now and not is_setup:
         sl_lv = entry - d["sl"] if sig == "BUY" else entry + d["sl"]
         tp_lvs = [("TP1", d["tp1"]), ("TP2", d["tp2"]), ("TP3", d["tp3"])]
         tp_vals = [(n, entry + v if sig == "BUY" else entry - v) for n, v in tp_lvs]
+    else:
+        tp_vals = []
 
     WIB = datetime.timezone(datetime.timedelta(hours=7))
     xs = list(range(len(bars)))
@@ -53,7 +57,8 @@ def main():
                                    color=col, zorder=3))
 
     lo, hi = min(lows), max(highs)
-    lvls = ([sl_lv] + [v for _, v in tp_vals] if not is_now else [])
+    lvls = ([sl_lv] + [v for _, v in tp_vals]
+            if not is_now and not is_setup else [])
     pat = d.get("pattern")
     if pat:
         lvls.append(pat["neck"])
@@ -84,28 +89,29 @@ def main():
                 color="#ff9800", va="top", ha="left", fontsize=9,
                 bbox=dict(fc="white", ec="none", alpha=0.7, pad=1))
     if not is_now:
-        # SL / TPs (dimmed dashed when historical) — labels show PRICES
-        sl_col = "#9e9e9e" if is_hist else "#d32f2f"
-        tp_col = "#9e9e9e" if is_hist else "#2e7d32"
-        ax.axhline(sl_lv, color=sl_col, ls="--" if is_hist else "-",
-                   lw=1.0 if is_hist else 1.4, alpha=0.7 if is_hist else 1.0)
-        ax.text(xs[-1], sl_lv, f"  SL ${sl_lv:.0f}", color=sl_col, va="center",
-                fontsize=9 if is_hist else 10,
-                fontweight="normal" if is_hist else "bold",
-                bbox=dict(fc="white", ec="none", alpha=0.7, pad=1))
-        for n, v in tp_vals:
-            ax.axhline(v, color=tp_col, ls=":", lw=1.0 if is_hist else 1.3,
-                       alpha=0.6 if is_hist else 1.0)
-            ax.text(xs[-1], v, f"  {n} ${v:.0f}", color=tp_col, va="center",
-                    fontsize=8 if is_hist else 9,
+        if not is_setup:
+            # SL / TPs (dimmed dashed when historical) — labels show PRICES
+            sl_col = "#9e9e9e" if is_hist else "#d32f2f"
+            tp_col = "#9e9e9e" if is_hist else "#2e7d32"
+            ax.axhline(sl_lv, color=sl_col, ls="--" if is_hist else "-",
+                       lw=1.0 if is_hist else 1.4, alpha=0.7 if is_hist else 1.0)
+            ax.text(xs[-1], sl_lv, f"  SL ${sl_lv:.0f}", color=sl_col, va="center",
+                    fontsize=9 if is_hist else 10,
+                    fontweight="normal" if is_hist else "bold",
                     bbox=dict(fc="white", ec="none", alpha=0.7, pad=1))
+            for n, v in tp_vals:
+                ax.axhline(v, color=tp_col, ls=":", lw=1.0 if is_hist else 1.3,
+                           alpha=0.6 if is_hist else 1.0)
+                ax.text(xs[-1], v, f"  {n} ${v:.0f}", color=tp_col, va="center",
+                        fontsize=8 if is_hist else 9,
+                        bbox=dict(fc="white", ec="none", alpha=0.7, pad=1))
         # NOW price line — so you can see current price vs entry/SL/TP at a glance
         now_px = closes[-1]
         ax.axhline(now_px, color="#7b1fa2", ls="--", lw=1.2, alpha=0.9)
         ax.text(xs[-1], now_px, f"  NOW ${now_px:.0f}", color="#7b1fa2",
                 va="bottom", fontsize=9, fontweight="bold",
                 bbox=dict(fc="white", ec="none", alpha=0.7, pad=1))
-        if not is_hist:
+        if not is_hist and not is_setup:
             # risk zone (entry->SL, red tint) and first profit zone (entry->TP1, green tint)
             tp1_v = tp_vals[0][1]
             if sig == "BUY":
@@ -148,8 +154,9 @@ def main():
         mcol = "#2e7d32" if sig == "BUY" else "#d32f2f"
         ax.scatter([i], [closes[i]], s=220, marker=marker, color=mcol, zorder=5,
                    edgecolors="black", linewidths=0.8)
+        _mlabel = f"WATCH {sig}" if is_setup else f"ENTRY {sig}"
         ax.text(i, closes[i] + (pad * 0.35 if sig == "BUY" else -pad * 0.55),
-                f"ENTRY {sig}", color=mcol, fontsize=11, fontweight="bold",
+                _mlabel, color=mcol, fontsize=11, fontweight="bold",
                 ha="center", va="bottom" if sig == "BUY" else "top",
                 bbox=dict(fc="white", ec=mcol, alpha=0.9, pad=2))
 
@@ -158,7 +165,7 @@ def main():
     step = max(1, len(bars) // 8)
     ax.set_xticks(xs[::step])
     ax.set_xticklabels([t.strftime("%H:%M") for t in times[::step]], fontsize=9)
-    mode = "LIVE" if is_now else ("HIST" if is_hist else sig)
+    mode = "LIVE" if is_now else ("HIST" if is_hist else ("SETUP WATCH" if is_setup else sig))
     _tf = d.get("tf", "M5")  # multi-TF: M1/M5/M15 (default M5 for old callers)
     ax.set_title(f"XAUUSD {_tf} · {mode} · {d['bar_time_wib']} WIB · ${entry:.0f}",
                  fontsize=13, fontweight="bold", loc="left", pad=12)
