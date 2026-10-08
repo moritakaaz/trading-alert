@@ -83,83 +83,48 @@ def in_forex_hours(now):
     return True
 
 
-def main():
-    now = int(time.time())
-    state_missing = False
+def check_tf(tf, now):
+    # v2.4: per-timeframe checks (M1/M5/M15). Only checks TFs with alert_on=true.
+    STATE_TF = os.path.expanduser(f"~/hooks/state/xauusd_entry_{tf}.json")
+    LOG_TF = os.path.expanduser(f"~/hooks/logs/xauusd-entry-{tf}.jsonl")
     try:
-        with open(STATE) as f:
+        with open(STATE_TF) as f:
             st = json.load(f)
+        state_missing = False
     except Exception:
         st = {}
         state_missing = True
-    # FIX (2026-10-05): if state is missing/corrupt, alert instead of
-    # going silent — the alert script defaults alert_on=True, so a silent
-    # watchdog would leave the system unmonitored.
     if state_missing:
-        last_wd = st.get("watchdog_last_alert", 0)
-        if now - last_wd > 3600:
-            tg_send("⚠️ <b>Watchdog: state file missing/corrupt</b>\n\n"
-                    "File <code>xauusd_entry_m5.json</code> cannot be read. "
-                    "The alert script may be running without the watchdog. Check immediately.")
-            log("alert:state-missing")
-        else:
-            log("state-missing:already-alerted")
-    # default True to match the alert script's behavior when state is empty
-    alert_on = st.get("alert_on", True)
+        # only alert if this TF was supposed to be on (avoid noise for never-used TFs)
+        log(f"{tf}:skip:state-missing")
+        return
+    alert_on = st.get("alert_on", False)
     if not alert_on:
-        log("skip:alert-off")
+        log(f"{tf}:skip:alert-off")
         return
 
     # --- 1. heartbeat freshness ---
+    # heartbeat is every 5 min (replace method edits in place)
     last_hb = st.get("last_heartbeat", 0)
     if in_forex_hours(now) and now - last_hb > 900:
         mins = int((now - last_hb) / 60)
-        # dedupe: don't spam every 10 min
         last_wd = st.get("watchdog_last_alert", 0)
         if now - last_wd > 3600:
             tg_send(
-                f"⚠️ <b>SYSTEM DOWN?</b>\n"
+                f"⚠️ <b>SYSTEM DOWN? ({tf.upper()})</b>\n"
                 f"Last heartbeat {mins} minutes ago.\n"
-                f"The xauusd-entry-m5 hook may be dead. Check /alert_status.")
-            # atomic write via tempfile + replace (lock-free readers
-            # never see partial); lock on separate .lock file
-            import tempfile
-            lock_path = STATE + ".lock"
-            with open(lock_path, "a+") as lf:
-                fcntl.flock(lf, fcntl.LOCK_EX)
-                try:
-                    try:
-                        with open(STATE) as rf:
-                            s = json.load(rf)
-                    except Exception:
-                        s = {}
-                    s["watchdog_last_alert"] = now
-                    d = os.path.dirname(STATE) or "."
-                    fd, tmp = tempfile.mkstemp(dir=d, prefix=".state_tmp_")
-                    try:
-                        with os.fdopen(fd, "w") as tf:
-                            json.dump(s, tf)
-                        os.replace(tmp, STATE)
-                    except Exception:
-                        try:
-                            os.unlink(tmp)
-                        except Exception:
-                            pass
-                        raise
-                finally:
-                    fcntl.flock(lf, fcntl.LOCK_UN)
-            log(f"alert:heartbeat-stale-{mins}m")
+                f"The xauusd-entry-{tf} hook may be dead. Check /alert_status.")
+            save_wd_ts(STATE_TF, "watchdog_last_alert", now)
+            log(f"{tf}:alert:heartbeat-stale-{mins}m")
         else:
-            log("heartbeat-stale:already-alerted")
+            log(f"{tf}:heartbeat-stale:already-alerted")
     else:
-        log("ok:heartbeat-fresh")
+        log(f"{tf}:ok:heartbeat-fresh")
 
     # --- 2. consecutive price-fetch failures ---
-    # (FIX 2026-10-05: removed dead `fails` loop; fixed missing write-back
-    # of watchdog_last_price_alert which caused alert spam every 10 min)
     try:
         trailing = 0
-        with open(LOG) as f:
+        with open(LOG_TF) as f:
             lines = f.readlines()[-20:]
         for line in reversed(lines):
             try:
@@ -175,25 +140,57 @@ def main():
             last_wd = st.get("watchdog_last_price_alert", 0)
             if now - last_wd > 3600:
                 tg_send(
-                    f"⚠️ <b>PRICE FEED DOWN</b>\n"
+                    f"⚠️ <b>PRICE FEED DOWN ({tf.upper()})</b>\n"
                     f"{trailing} consecutive price fetch failures.\n"
                     f"Check connection / API quota.")
-                try:
-                    with open(STATE, "r+") as f:
-                        fcntl.flock(f, fcntl.LOCK_EX)
-                        s = json.load(f)
-                        s["watchdog_last_price_alert"] = now
-                        f.seek(0)
-                        json.dump(s, f)
-                        f.truncate()
-                        fcntl.flock(f, fcntl.LOCK_UN)
-                except Exception:
-                    pass
-                log(f"alert:price-fail-x{trailing}")
+                save_wd_ts(STATE_TF, "watchdog_last_price_alert", now)
+                log(f"{tf}:alert:price-fail-x{trailing}")
             else:
-                log("price-fail:already-alerted")
+                log(f"{tf}:price-fail:already-alerted")
     except Exception as ex:
-        log(f"price-check-fail:{str(ex)[:40]}")
+        log(f"{tf}:price-check-fail:{str(ex)[:40]}")
+
+
+def save_wd_ts(state_path, key, now):
+    # atomic write via tempfile + replace; lock on separate .lock file
+    import tempfile
+    lock_path = state_path + ".lock"
+    try:
+        with open(lock_path, "a+") as lf:
+            fcntl.flock(lf, fcntl.LOCK_EX)
+            try:
+                try:
+                    with open(state_path) as rf:
+                        s = json.load(rf)
+                except Exception:
+                    s = {}
+                s[key] = now
+                d = os.path.dirname(state_path) or "."
+                fd, tmp = tempfile.mkstemp(dir=d, prefix=".state_tmp_")
+                try:
+                    with os.fdopen(fd, "w") as tf:
+                        json.dump(s, tf)
+                    os.replace(tmp, state_path)
+                except Exception:
+                    try:
+                        os.unlink(tmp)
+                    except Exception:
+                        pass
+                    raise
+            finally:
+                fcntl.flock(lf, fcntl.LOCK_UN)
+    except Exception:
+        pass
+
+
+def main():
+    now = int(time.time())
+    # v2.4: check all three timeframes (only those with alert_on=true)
+    for tf in ("m1", "m5", "m15"):
+        try:
+            check_tf(tf, now)
+        except Exception as ex:
+            log(f"{tf}:check-fail:{str(ex)[:40]}")
 
     # --- 3. command handler liveness (FIX #6, 2026-10-05) ---
     # If xauusd-tg-cmd dies, Telegram commands silently stop working
@@ -203,23 +200,20 @@ def main():
         cmd_mtime = os.path.getmtime(cmd_log) if os.path.exists(cmd_log) else 0
         # tg-cmd polls every 30s, so >5 min without a log line = dead
         if now - cmd_mtime > 300:
-            last_wd = st.get("watchdog_last_cmd_alert", 0)
+            # use M5 state for dedupe (shared watchdog timestamps)
+            try:
+                with open(os.path.expanduser("~/hooks/state/xauusd_entry_m5.json")) as f:
+                    st5 = json.load(f)
+            except Exception:
+                st5 = {}
+            last_wd = st5.get("watchdog_last_cmd_alert", 0)
             if now - last_wd > 3600:
                 tg_send(
                     f"⚠️ <b>COMMAND HANDLER DOWN?</b>\n"
                     f"No activity for {int((now - cmd_mtime) / 60)} minutes.\n"
                     f"Telegram commands may not be responding.")
-                try:
-                    with open(STATE, "r+") as f:
-                        fcntl.flock(f, fcntl.LOCK_EX)
-                        s = json.load(f)
-                        s["watchdog_last_cmd_alert"] = now
-                        f.seek(0)
-                        json.dump(s, f)
-                        f.truncate()
-                        fcntl.flock(f, fcntl.LOCK_UN)
-                except Exception:
-                    pass
+                save_wd_ts(os.path.expanduser("~/hooks/state/xauusd_entry_m5.json"),
+                           "watchdog_last_cmd_alert", now)
                 log("alert:cmd-handler-stale")
             else:
                 log("cmd-handler-stale:already-alerted")

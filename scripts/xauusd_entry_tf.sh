@@ -189,6 +189,72 @@ def tg_send(text, photo=None, caption=None, silent=False, keyboard=None):
     except Exception as ex:
         log(HOOK_ID, f"tg-fail:{str(ex)[:60]}")
 
+def tg_edit_or_send(text, state_key, silent=True):
+    # v2.4: heartbeat replace method — edit the previous heartbeat message
+    # in place instead of spamming new ones. Stores message_id in state.
+    # Returns True if sent/edited OK.
+    try:
+        if os.environ.get("HATCH_HOOK_DRY_RUN") == "1":
+            return True
+        tok, cid = None, None
+        with open(os.path.expanduser("~/.tg-alert-bot/.env")) as f:
+            for line in f:
+                if line.startswith("TELEGRAM_BOT_TOKEN="):
+                    tok = line.strip().split("=", 1)[1]
+                elif line.startswith("TELEGRAM_CHAT_ID="):
+                    cid = line.strip().split("=", 1)[1]
+        if not tok or not cid:
+            return False
+        base = "https://api.telegram.org/bot" + tok
+        def esc(s):
+            return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        msg_id = st.get(state_key)
+        # try editing the previous message
+        if msg_id:
+            cmd = ["curl", "-s", "-m", "25",
+                   "--data-urlencode", "chat_id=" + cid,
+                   "--data-urlencode", "message_id=" + str(msg_id),
+                   "--data-urlencode", "text=" + esc(text),
+                   "--data-urlencode", "parse_mode=HTML",
+                   base + "/editMessageText"]
+            try:
+                r = subprocess.run(cmd, capture_output=True, timeout=30)
+                if b'"ok":true' in (r.stdout or b""):
+                    log(HOOK_ID, "tg-heartbeat-edited")
+                    return True
+            except Exception:
+                pass
+            # edit failed (too old/deleted) — fall through to send new
+        cmd = ["curl", "-s", "-m", "25",
+               "--data-urlencode", "chat_id=" + cid,
+               "--data-urlencode", "text=" + esc(text),
+               "--data-urlencode", "parse_mode=HTML"]
+        if silent:
+            cmd += ["--data-urlencode", "disable_notification=true"]
+        cmd.append(base + "/sendMessage")
+        for attempt in range(2):
+            try:
+                r = subprocess.run(cmd, capture_output=True, timeout=30)
+                out_b = r.stdout or b""
+                if b'"ok":true' in out_b:
+                    # extract message_id for next edit
+                    try:
+                        mid = json.loads(out_b)["result"]["message_id"]
+                        save_state_keys({state_key: mid})
+                    except Exception:
+                        pass
+                    log(HOOK_ID, "tg-heartbeat-sent-new")
+                    return True
+            except Exception:
+                pass
+            if attempt == 0:
+                time.sleep(3)
+        log(HOOK_ID, "tg-fail:heartbeat-failed-2x")
+        return False
+    except Exception as ex:
+        log(HOOK_ID, f"tg-fail:heartbeat:{str(ex)[:40]}")
+        return False
+
 # inline keyboard for entry alerts: chart / status / pause / off
 ALERT_KB = {"inline_keyboard": [
     [{"text": "📈 Chart", "callback_data": "chart"},
@@ -391,6 +457,8 @@ def detect_dtb():
             return "SELL", {"kind": "DOUBLE TOP", "p1": H[p1],
                             "p2": H[p2], "neck": vlo,
                             "p2_t": closed_tf[p2][0],
+                            "p1_t": closed_tf[p1][0],
+                            "neck_t": closed_tf[vi][0],
                             "score": _score, "grade": _grade,
                             "rsi_div": _rsi_div}
     # double bottoms -> BUY
@@ -425,6 +493,8 @@ def detect_dtb():
             return "BUY", {"kind": "DOUBLE BOTTOM", "p1": L[p1],
                            "p2": L[p2], "neck": vhi,
                            "p2_t": closed_tf[p2][0],
+                           "p1_t": closed_tf[p1][0],
+                           "neck_t": closed_tf[pi][0],
                            "score": _score, "grade": _grade,
                            "rsi_div": _rsi_div}
     return None, None
@@ -485,6 +555,8 @@ def detect_setup():
         best = (p2, "SELL", {"kind": "DOUBLE TOP", "p1": H[p1],
                              "p2": H[p2], "neck": vlo,
                              "p2_t": closed_tf[p2][0],
+                             "p1_t": closed_tf[p1][0],
+                             "neck_t": closed_tf[vi][0],
                              "score": _score, "grade": _grade,
                              "rsi_div": _rsi_div})
     # double bottoms forming -> potential BUY
@@ -523,6 +595,8 @@ def detect_setup():
             best = (p2, "BUY", {"kind": "DOUBLE BOTTOM", "p1": L[p1],
                                 "p2": L[p2], "neck": vhi,
                                 "p2_t": closed_tf[p2][0],
+                                "p1_t": closed_tf[p1][0],
+                                "neck_t": closed_tf[pi][0],
                                 "score": _score, "grade": _grade,
                                 "rsi_div": _rsi_div})
     if best:
@@ -562,9 +636,10 @@ except Exception:
 WIB = datetime.timezone(datetime.timedelta(hours=7))
 
 def heartbeat_maybe(reason):
-    # liveness ping on every no-signal poll while alerts are ON
-    # (this script only runs when the hook is enabled; user explicitly
-    # asked for every-few-minutes pings and doesn't mind the spam)
+    # liveness ping while alerts are ON — every 5 min, but using REPLACE method:
+    # edits the previous Telegram heartbeat message in place (no spam).
+    # WhatsApp side chat gets nothing (silent) — use /alert_status to check.
+    # (2026-10-08: user found every-5-min new messages too spammy.)
     if now - st.get("last_heartbeat", 0) < 300:
         log(HOOK_ID, reason); out("silent", reason)
     try:
@@ -611,9 +686,9 @@ def heartbeat_maybe(reason):
     msg = (f"🟢 Entry alert ACTIVE ({TF_UP}) — {n}x checks today, no BUY/SELL signal yet\n"
            f"(last check {wib_now} WIB). Type {_off_cmd} to stop.{extra}")
     log(HOOK_ID, "heartbeat")
-    tg_send(msg, silent=True)  # heartbeat: no sound, so entries stand out
-    out("wake", "heartbeat", {"message": msg, "polls_today": n,
-                              "trade_closed": closed_kind})
+    # v2.4 replace method: edit previous TG heartbeat in place; WA gets nothing
+    tg_edit_or_send(msg, "heartbeat_msg_id", silent=True)
+    out("silent", "heartbeat")
 
 def resolve_active_trade():
     # One position at a time: while the previous signal's trade is still
@@ -892,7 +967,8 @@ if sig is None:
                 "bars": [{"t": b[0], "o": b[1], "h": b[2], "l": b[3], "c": b[4]}
                          for b in closed_tf],
                 "pattern": {k: _setup_pat[k] for k in
-                            ("kind", "p1", "p2", "neck") if k in _setup_pat},
+                            ("kind", "p1", "p2", "neck", "p1_t", "neck_t", "p2_t")
+                            if k in _setup_pat},
                 "signal": _setup_sig, "entry": _cur,
                 "sl": 0, "tp1": 0, "tp2": 0, "tp3": 0,
                 "bar_time_wib": _wib, "out": _chart_path,
@@ -1151,7 +1227,8 @@ try:
     chart_in = {
         "bars": [{"t": b[0], "o": b[1], "h": b[2], "l": b[3], "c": b[4]} for b in closed_tf],
         "pattern": {k: pattern[k] for k in
-                    ("kind", "p1", "p2", "neck", "upper", "lower")
+                    ("kind", "p1", "p2", "neck", "upper", "lower",
+                     "p1_t", "neck_t", "p2_t")
                     if k in pattern},
         "signal": sig, "entry": price, "tf": TF_UP,
         "sl": sl_d, "tp1": tp1_d, "tp2": tp2_d, "tp3": tp3_d,
