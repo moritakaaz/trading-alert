@@ -153,13 +153,15 @@ def tg_send(text, photo=None, caption=None, silent=False, keyboard=None):
         def esc(s):
             return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         if photo and os.path.isfile(photo):
+            # send photo WITH the message text as caption (single message)
             subprocess.run(["curl", "-s", "-m", "25",
                             "-F", "chat_id=" + cid,
                             "-F", "photo=@" + photo,
-                            "-F", "caption=" + esc(caption or "📊 Chart entry"),
+                            "-F", "caption=" + esc(caption or text),
                             "-F", "parse_mode=HTML",
                             base + "/sendPhoto"],
                            capture_output=True, timeout=30)
+            return  # don't send separate text message
         cmd = ["curl", "-s", "-m", "25",
                "--data-urlencode", "chat_id=" + cid,
                "--data-urlencode", "text=" + esc(text),
@@ -987,6 +989,13 @@ if sig is None:
             _dir_emoji = "🟢" if _setup_sig == "BUY" else "🔴"
             _wib = datetime.datetime.fromtimestamp(
                 sig_bar[0], datetime.timezone.utc).astimezone(WIB).strftime("%d %b %H:%M")
+            # SL/TP for setup watch (same 1.5xATR logic as entry, for preparation)
+            _m = 1 if _setup_sig == "BUY" else -1
+            _sl_d = 1.5 * a1
+            _sl = int(round(_neck - _m * _sl_d))
+            _t1 = int(round(_neck + _m * _sl_d))
+            _t2 = int(round(_neck + _m * _sl_d * 1.5))
+            _t3 = int(round(_neck + _m * _sl_d * 2.0))
             _setup_msg = (
                 f"⚠️ SETUP WATCH ({TF_UP}): potential {_setup_sig} forming\n"
                 f"📐 Pattern: {_setup_pat['kind']} (neckline ${_neck})"
@@ -996,6 +1005,7 @@ if sig is None:
                 f"{'Entry triggers if a candle closes above' if _setup_sig == 'BUY' else 'Entry triggers if a candle closes below'} ${_neck}.\n"
                 f"To prepare: place {'BUY STOP' if _setup_sig == 'BUY' else 'SELL STOP'} at ${_neck} "
                 f"(not {'buy' if _setup_sig == 'BUY' else 'sell'} limit).\n"
+                f"🎯 Entry ${_neck} · 🛑 SL ${_sl} · TP1 ${_t1} · TP2 ${_t2} · TP3 ${_t3}\n"
                 f"\n🕐 {_wib} WIB [setup v2.4]"
             )
             # chart of the forming pattern
