@@ -13,11 +13,10 @@ logs/
 *.log
 *.jsonl
 *.lock
-*.csv
-
-# === Generated charts ===
+# B59: narrowed — only ignore CSVs/PNGs in runtime dirs, not repo-wide
+state/*.csv
 charts/*.png
-*.png
+charts/*.jpg
 
 # === Python ===
 __pycache__/

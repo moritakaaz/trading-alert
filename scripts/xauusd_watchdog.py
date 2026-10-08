@@ -220,29 +220,77 @@ def main():
     # while the entry heartbeat looks healthy. Check its log freshness.
     try:
         cmd_log = os.path.expanduser("~/hooks/logs/xauusd-tg-cmd.jsonl")
-        cmd_mtime = os.path.getmtime(cmd_log) if os.path.exists(cmd_log) else 0
-        # tg-cmd polls every 30s, so >5 min without a log line = dead
-        if now - cmd_mtime > 300:
-            # B35: dedupe in watchdog's own state file
-            try:
-                with open(WD_STATE) as f:
-                    st5 = json.load(f)
-            except Exception:
-                st5 = {}
-            last_wd = st5.get("watchdog_last_cmd_alert", 0)
-            if now - last_wd > 3600:
-                tg_send(
-                    f"⚠️ <b>COMMAND HANDLER DOWN?</b>\n"
-                    f"No activity for {int((now - cmd_mtime) / 60)} minutes.\n"
-                    f"Telegram commands may not be responding.")
-                save_wd_ts(WD_STATE, "watchdog_last_cmd_alert", now)
-                log("alert:cmd-handler-stale")
-            else:
-                log("cmd-handler-stale:already-alerted")
+        # B56: if the log file does not exist yet (fresh install), skip the
+        # check instead of firing COMMAND HANDLER DOWN on every run.
+        if not os.path.exists(cmd_log):
+            log("ok:cmd-log-not-yet-created")
         else:
-            log("ok:cmd-handler-alive")
+            _check_cmd_stale(now, os.path.getmtime(cmd_log))
     except Exception as ex:
         log(f"cmd-check-fail:{str(ex)[:40]}")
+
+    # B57: rotate logs on every watchdog run (cheap, idempotent)
+    try:
+        prune_logs()
+    except Exception:
+        pass
+
+
+def prune_logs(days=14):
+    """B57: rotate jsonl logs — keep only the last `days` days of entries.
+
+    Idempotent and cheap: files are only rewritten when lines are dropped.
+    """
+    cutoff = time.time() - days * 86400
+    for pat in ("~/hooks/logs/xauusd-entry-m1.jsonl",
+                "~/hooks/logs/xauusd-entry-m5.jsonl",
+                "~/hooks/logs/xauusd-entry-m15.jsonl",
+                "~/hooks/logs/xauusd-tg-cmd.jsonl",
+                "~/hooks/logs/xauusd-watchdog.jsonl"):
+        p = os.path.expanduser(pat)
+        try:
+            with open(p) as f:
+                lines = f.readlines()
+        except FileNotFoundError:
+            continue
+        kept = []
+        for line in lines:
+            try:
+                ts = json.loads(line).get("started_at_ms", 0) / 1000
+                if ts >= cutoff or ts == 0:
+                    kept.append(line)
+            except Exception:
+                kept.append(line)  # keep unparseable lines rather than dropping
+        if len(kept) < len(lines):
+            try:
+                with open(p, "w") as f:
+                    f.writelines(kept)
+                log(f"pruned:{os.path.basename(p)}:{len(lines)}->{len(kept)}")
+            except Exception:
+                pass
+
+
+def _check_cmd_stale(now, cmd_mtime):
+    # tg-cmd polls every 30s, so >5 min without a log line = dead
+    if now - cmd_mtime > 300:
+        # B35: dedupe in watchdog's own state file
+        try:
+            with open(WD_STATE) as f:
+                st5 = json.load(f)
+        except Exception:
+            st5 = {}
+        last_wd = st5.get("watchdog_last_cmd_alert", 0)
+        if now - last_wd > 3600:
+            tg_send(
+                f"⚠️ <b>COMMAND HANDLER DOWN?</b>\n"
+                f"No activity for {int((now - cmd_mtime) / 60)} minutes.\n"
+                f"Telegram commands may not be responding.")
+            save_wd_ts(WD_STATE, "watchdog_last_cmd_alert", now)
+            log("alert:cmd-handler-stale")
+        else:
+            log("cmd-handler-stale:already-alerted")
+    else:
+        log("ok:cmd-handler-alive")
 
 
 if __name__ == "__main__":

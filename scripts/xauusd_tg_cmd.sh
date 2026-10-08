@@ -958,8 +958,7 @@ def handle(text):
         if cmd == "/close_trade":
             parts = text.strip().split()
             o = (parts[1] if len(parts) > 1 else "manual").lower()
-            # FIX #3 (2026-10-05): use standard outcome format that
-            # /history and scoreboard recognize (not "closed-tp1")
+            # standard outcome format for /history + scoreboard
             omap = {"sl": ("closed", "SL", "-1"),
                     "tp1": ("closed", "TP1", "1"),
                     "tp2": ("closed", "TP2", "1.5"),
@@ -973,8 +972,7 @@ def handle(text):
             outcome_map[cmd] = (_st, _oc, _rm,
                                 f"Trade closed manually ({o}).")
         status, outcome, rmult, desc = outcome_map[cmd]
-        # v2.4 FIX #3: target ONLY the active trade's journal row (by alert_time_utc),
-        # not all open rows. The old code corrupted PF stats by closing every open row.
+        # target ONLY the active trade's journal row (see CHANGELOG P0/B10)
         _target_iso = None
         if at and at.get("bar_ts"):
             try:
@@ -1020,7 +1018,7 @@ def handle(text):
         return (f"✅ <b>{desc}</b>\n"
                 f"Position: {sig_txt}\n"
                 f"Monitoring new signals again.")
-    # (removed duplicate /alert_status,/check,/history handlers — 2026-10-05)
+    # (duplicate handlers removed; see CHANGELOG)
     if cmd == "/reset_trade":
         # Emergency reset: clear a stuck active_trade (e.g. state desync
         # where the journal says open but no position is actually tracked,
@@ -1080,8 +1078,7 @@ try:
                 if cq:
                     cq_chat = str((cq.get("message") or {}).get("chat", {}).get("id"))
                     if cq_chat == CHAT_ID:
-                        # FIX #7 (2026-10-05): DRY-guard the callback answer —
-                        # dry runs must not send real Telegram API calls
+                        # DRY-guard: dry runs must not send real Telegram API calls
                         if os.environ.get("HATCH_HOOK_DRY_RUN") != "1":
                             try:
                                 tg_api("answerCallbackQuery",
