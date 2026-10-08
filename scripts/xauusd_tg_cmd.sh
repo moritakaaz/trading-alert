@@ -109,6 +109,50 @@ def save_state(st):
             finally:
                 fcntl.flock(lf, fcntl.LOCK_UN)
 
+# ---- multi-TF alert switches (v2.1): each TF has its own state file
+# with its own alert_on flag. /alert_on|off = M5 (legacy behavior unchanged).
+TF_STATE_FILES = {
+    "m1": os.path.expanduser("~/hooks/state/xauusd_entry_m1.json"),
+    "m5": os.path.expanduser("~/hooks/state/xauusd_entry_m5.json"),
+    "m15": os.path.expanduser("~/hooks/state/xauusd_entry_m15.json"),
+}
+
+def load_tf_state(tf):
+    try:
+        return json.load(open(TF_STATE_FILES[tf]))
+    except Exception:
+        return {}
+
+def save_tf_state(tf, updates):
+    if DRY:
+        return
+    import fcntl, tempfile
+    sf = TF_STATE_FILES[tf]
+    lock_path = sf + ".lock"
+    with open(lock_path, "a+") as lf:
+        fcntl.flock(lf, fcntl.LOCK_EX)
+        try:
+            try:
+                with open(sf) as f:
+                    cur = json.load(f)
+            except Exception:
+                cur = {}
+            cur.update(updates)
+            d = os.path.dirname(sf) or "."
+            fd, tmp = tempfile.mkstemp(dir=d, prefix=".state_tmp_")
+            try:
+                with os.fdopen(fd, "w") as tf_:
+                    json.dump(cur, tf_)
+                os.replace(tmp, sf)
+            except Exception:
+                try:
+                    os.unlink(tmp)
+                except Exception:
+                    pass
+                raise
+        finally:
+            fcntl.flock(lf, fcntl.LOCK_UN)
+
 JOURNAL_FILE = os.path.expanduser("~/hooks/state/entry_journal.csv")
 
 def save_journal_rows(update_fn):
@@ -212,18 +256,30 @@ def status_text():
         pos_line = f"\n📌 {at['signal']} position @ ~${at['entry']} still open (TP1 ${tp1_px})"
     _m = st.get("modal") or {"amount": 600, "currency": "usc"}
     _mu = "USC" if (_m.get("currency") or "usc") == "usc" else "USD"
-    return (f"{emoji} <b>XAUUSD M5 alerts: {'ON' if on else 'OFF'}</b>\n"
+    # multi-TF switches (v2.1)
+    _tf_lines = []
+    for _tf in ("m1", "m5", "m15"):
+        _s = load_tf_state(_tf)
+        _on = _s.get("alert_on", True)
+        _e = "🟢" if _on else "🔴"
+        _tf_lines.append(f"{_e} {_tf.upper()}: {'ON' if _on else 'OFF'}")
+    _tf_block = "\n".join(_tf_lines)
+    return (f"🤖 <b>XAUUSD alerts by timeframe</b>\n{_tf_block}\n"
             f"💰 Balance: {_m.get('amount')} {_mu} (/set_balance to change)\n"
-            f"📊 {n_today}x checks today (last {last_poll} WIB)\n"
+            f"📊 M5: {n_today}x checks today (last {last_poll} WIB)\n"
             f"🚨 Last signal: {esc(last_sig)}{pos_line}")
 
 HELP = ("🤖 <b>XAUUSD alert bot commands</b>\n"
-        "/alert_on — turn alerts on\n"
-        "/alert_off — turn alerts off\n"
-        "/alert_status — system status\n"
+        "/alert_on — turn M5 alerts on\n"
+        "/alert_off — turn M5 alerts off\n"
+        "/alert_on_m1 — turn M1 alerts on\n"
+        "/alert_off_m1 — turn M1 alerts off\n"
+        "/alert_on_m15 — turn M15 alerts on\n"
+        "/alert_off_m15 — turn M15 alerts off\n"
+        "/alert_status — system status (all TFs)\n"
         "/check — status + last signal\n"
         "/chart — live XAUUSD chart + data\n"
-        "/trend — current H4 & H1 trend\n"
+        "/trend — current H1 & M15 trend\n"
         "/history — last 10 signals + results\n"
         "/set_balance — set balance (e.g. /set_balance 600 usc)\n"
         "/skip_trade — skip signal (no entry)\n"
@@ -298,35 +354,58 @@ def td_ohlc(interval, n):
     return [(v["t"], v["o"], v["h"], v["l"], v["c"]) for v in d["values"]]
 
 def trend_text():
-    # Current trend: H4 (the signal filter) + H1 (short-term context).
-    # Same H4 logic as the alert script: H1 resampled to H4, SMA(15).
+    # v2.0 trend: H1 + M15 EMA20/50 (the signal filter).
+    # Both agree -> only that direction passes; disagree -> both allowed.
     try:
         h1 = td_ohlc("1h", 80)
+        m5 = td_ohlc("5min", 300)
     except Exception as ex:
         return f"❌ Failed to fetch price data: {esc(str(ex)[:60])}"
-    closes = [b[4] for b in h1]
-    if len(closes) < 60:
+    h1c = [b[4] for b in h1]
+    if len(h1c) < 55:
         return "❌ Not enough H1 data to compute trend."
-    # H4: resample 4x H1 -> H4 closes
-    h4 = []
-    for i in range(0, len(h1) - 3, 4):
-        grp = h1[i:i + 4]
-        h4.append(grp[-1][4])
-    h4_sma = sum(h4[-15:]) / 15
-    h4_trend = "BULLISH" if h4[-1] > h4_sma else "BEARISH"
-    # H1 short-term: price vs SMA(20)
-    h1_sma = sum(closes[-20:]) / 20
-    h1_trend = "BULLISH" if closes[-1] > h1_sma else "BEARISH"
-    now_px = closes[-1]
-    e4 = "🟢" if h4_trend == "BULLISH" else "🔴"
+    # M15 resample from M5
+    _m15 = []
+    _bkt = None
+    for _b in m5:
+        _mb = _b[0] - (_b[0] % 900)
+        if _bkt is None or _bkt[0] != _mb:
+            if _bkt:
+                _m15.append(_bkt)
+            _bkt = [_mb, _b[1], _b[2], _b[3], _b[4]]
+        else:
+            _bkt[2] = max(_bkt[2], _b[2])
+            _bkt[3] = min(_bkt[3], _b[3])
+            _bkt[4] = _b[4]
+    if _bkt:
+        _m15.append(_bkt)
+    _now15 = int(time.time()) - (int(time.time()) % 900)
+    m15c = [_b[4] for _b in _m15 if _b[0] < _now15]
+    if len(m15c) < 55:
+        return "❌ Not enough M15 data to compute trend."
+    def _ema(vals, period):
+        _k = 2.0 / (period + 1)
+        _e = sum(vals[:period]) / period
+        for _v in vals[period:]:
+            _e = _v * _k + _e * (1 - _k)
+        return _e
+    h1_d = _ema(h1c, 20) - _ema(h1c, 50)
+    m15_d = _ema(m15c, 20) - _ema(m15c, 50)
+    h1_trend = "BULLISH" if h1_d > 0 else "BEARISH"
+    m15_trend = "BULLISH" if m15_d > 0 else "BEARISH"
+    now_px = h1c[-1]
     e1 = "🟢" if h1_trend == "BULLISH" else "🔴"
-    sig_ok = "BUY" if h4_trend == "BULLISH" else "SELL"
+    em = "🟢" if m15_trend == "BULLISH" else "🔴"
+    if h1_trend == m15_trend:
+        fmsg = f"only <b>{'BUY' if h1_trend == 'BULLISH' else 'SELL'}</b> passes"
+    else:
+        fmsg = "both directions allowed"
     return (f"📊 <b>Current XAUUSD trend</b>\n\n"
-            f"{e4} <b>H4: {h4_trend}</b> (SMA15 ${h4_sma:,.0f})\n"
-            f"   → signal filter: only <b>{sig_ok}</b> passes\n\n"
-            f"{e1} H1: {h1_trend} (SMA20 ${h1_sma:,.0f})\n\n"
+            f"{e1} <b>H1: {h1_trend}</b> (EMA20/50)\n"
+            f"{em} <b>M15: {m15_trend}</b> (EMA20/50)\n"
+            f"   → signal filter: {fmsg}\n\n"
             f"💰 Price: <b>${now_px:,.2f}</b>\n"
-            f"[strat v1.1]")
+            f"[strat v2.0]")
 
 def last_signal():
     """Last journaled signal (the durable source of truth for /chart),
@@ -340,9 +419,9 @@ def last_signal():
 
 def handle_chart():
     """Render a live XAUUSD M5 chart showing the LAST signal's entry/SL/TP
-    levels (from the journal) + NOW price + Donchian channel.
+    levels (from the journal) + NOW price.
     Open signals: solid lines. Closed signals: dimmed dashed + outcome label.
-    No signals yet: NOW mode (Donchian + current price only).
+    No signals yet: NOW mode (current price only).
     Returns (photo_path_or_None, caption_or_error)."""
     try:
         m5 = td_ohlc("5min", 80)
@@ -359,9 +438,6 @@ def handle_chart():
     h1c = [b for b in h1 if b[0] < hour_start]
     if len(h1c) < 62:
         return None, "❌ Not enough H1 data."
-    win = h1c[-48:]
-    upper = max(b[2] for b in win)
-    lower = min(b[3] for b in win)
     trs = []
     for k in range(len(h1c) - 14, len(h1c)):
         h, l, pc = h1c[k][2], h1c[k][3], h1c[k - 1][4]
@@ -377,10 +453,7 @@ def handle_chart():
     chart_path = os.path.join(chart_dir, "now_%d.png" % sig_bar[0])
     bars_in = [{"t": b[0], "o": b[1], "h": b[2], "l": b[3], "c": b[4]}
                for b in closed5[-72:]]
-    du, dl = int(round(upper - cur)), int(round(cur - lower))
-    donchian_cap = (f"🔼 Upper ${int(round(upper))} (${du} away) | "
-                    f"🔽 Lower ${int(round(lower))} (${dl} away)\n"
-                    f"📏 H1 ATR ${int(round(a1))}")
+    atr_cap = f"📏 H1 ATR ${int(round(a1))}"
     def signal_age(iso):
         try:
             dt = datetime.datetime.strptime(
@@ -406,7 +479,7 @@ def handle_chart():
             ).replace(tzinfo=datetime.timezone.utc).timestamp())
         except Exception:
             sig_epoch = None
-        chart_in = {"bars": bars_in, "upper": upper, "lower": lower,
+        chart_in = {"bars": bars_in,
                     "signal": sig, "entry": e,
                     "sl": s_d, "tp1": t1d, "tp2": t2d, "tp3": t3d,
                     "bar_time_wib": wib_s, "out": chart_path,
@@ -419,7 +492,7 @@ def handle_chart():
             pnl = int(round((cur - e) * m))
             cap = (f"📊 <b>{sig} @ ${int(round(e))}</b> — now ${cur} ({pnl:+d}){age_s}\n"
                    f"🛑 SL ${sl_px} | 🎯 TP1 ${tp1_px}\n"
-                   f"{donchian_cap}")
+                   f"{atr_cap}")
         else:
             oc = (row.get("outcome") or "").strip()
             rm = (row.get("r_multiple") or "").strip()
@@ -430,13 +503,13 @@ def handle_chart():
                 pass
             chart_in["hist_label"] = f"→ {oc}{rtag}" if oc else ""
             cap = (f"📊 <b>Last signal: {sig} @ ${int(round(e))}</b> → {oc}{rtag}\n"
-                   f"{donchian_cap}")
+                   f"{atr_cap}")
     else:
-        chart_in = {"bars": bars_in, "upper": upper, "lower": lower,
+        chart_in = {"bars": bars_in,
                     "signal": "NOW", "entry": cur,
                     "bar_time_wib": wib_s, "out": chart_path}
         cap = (f"📊 <b>XAUUSD ${cur}</b> ({wib_s} WIB)\n"
-               f"{donchian_cap}")
+               f"{atr_cap}")
     try:
         tmp_in = chart_path + ".json"
         json.dump(chart_in, open(tmp_in, "w"))
@@ -514,12 +587,24 @@ def handle(text):
                 f"Update again via /set_balance after each deposit/withdrawal.")
     if cmd == "/alert_on":
         save_state({"alert_on": True, "paused_until": 0})
-        return ("🟢 <b>XAUUSD alerts turned on.</b>\n"
+        return ("🟢 <b>XAUUSD M5 alerts turned on.</b>\n"
                 "BUY/SELL signals + 5-min heartbeat active.")
     if cmd == "/alert_off":
         save_state({"alert_on": False})
-        return ("🔴 <b>XAUUSD alerts turned off.</b>\n"
+        return ("🔴 <b>XAUUSD M5 alerts turned off.</b>\n"
                 "Send /alert_on to turn them on again.")
+    if cmd in ("/alert_on_m1", "/alert_off_m1",
+               "/alert_on_m15", "/alert_off_m15"):
+        # multi-TF switches (v2.1): independent on/off per timeframe
+        _tf = "m1" if cmd.endswith("_m1") else "m15"
+        _turn_on = cmd.startswith("/alert_on")
+        save_tf_state(_tf, {"alert_on": _turn_on,
+                            "paused_until": 0} if _turn_on else {"alert_on": False})
+        _e = "🟢" if _turn_on else "🔴"
+        _w = "on" if _turn_on else "off"
+        return (f"{_e} <b>XAUUSD {_tf.upper()} alerts turned {_w}.</b>\n"
+                f"Send /alert_{'off' if _turn_on else 'on'}_{_tf} to turn them "
+                f"{'off' if _turn_on else 'on'} again.")
     if cmd in ("/alert_status", "/check"):
         return status_text()
     if cmd == "/history":

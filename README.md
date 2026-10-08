@@ -4,51 +4,62 @@
 > "learning money" (a small cent account). Do not use for live trading
 > without understanding the risks.
 
-An **XAUUSD (M5)** entry-alert system that pushes signals to Telegram:
-Donchian breakouts with trend filters, automatic journaling, entry charts,
+An **XAUUSD** multi-timeframe entry-alert system that pushes signals to Telegram:
+pattern breakouts + Donchian breakouts, automatic journaling, entry charts,
 position monitoring (TP1/TP2/TP3 + breakeven), and weekly performance reviews.
 
-## Strategy (v1.2, live)
+Three independent alert systems: **M1** (1-min poll), **M5** (5-min poll),
+**M15** (5-min poll). Each has its own on/off switch and journal.
 
-> System release v1.3 = v1.2 strategy + runner tracking notifications
-> (TP2/TP3/breakeven alerts after TP1). The signal logic itself is unchanged
-> since v1.2 — the journal still records `strategy_v=1.2`.
+## Strategy (v2.1 "brutal", live)
+
+> Experimental — no trend filter, dual trigger, high frequency.
 
 | Component | Detail |
 |---|---|
-| Trigger | Donchian(48) breakout on completed H1 bars, evaluated on each M5 close |
+| Trigger 1 (priority) | Double top/bottom on signal TF: M5 fractal peaks/valleys (N=2), \|p1-p2\| ≤ 0.25×ATR(H1), 5–50 bars apart, intervening extreme ≥3 bars from each side, confirmation = close beyond neckline with right color |
+| Trigger 2 | Donchian(48) breakout on completed H1 bars, evaluated on signal-TF close (no EMA filter) |
 | Stop loss | 1.5 × ATR(14) H1 |
 | Take profit | TP1 1R → SL to breakeven, TP2 1.5R, TP3 2R (runner) |
-| H4 trend filter | Hard filter — signals must align with the H4 trend (SMA15) |
-| EMA 20/50 filter | Hard filter — BUY only if EMA20 > EMA50 on H1 (and vice versa) |
-| Management | One position at a time; no signal stacking |
+| Trend filter | **REMOVED** — all signals fire, both directions |
+| Management | One position at a time per timeframe; no signal stacking |
 
-**Honest backtest results** (9 months, Jan–Oct 2026, 265 trades, PAXGUSDT M5 data):
+**Honest backtest results** (double top/bottom, sep≥3, 9 months Jan–Oct 2026,
+259 trades, PAXGUSDT M5 data):
 
 | Metric | Value |
 |---|---|
-| Profit Factor | **1.38** |
-| Win rate | 33.6% |
-| Average / trade | +0.18R |
-| Max drawdown | 15.3R |
+| Profit Factor | **1.18** |
+| Win rate | ~36% |
+| Average / trade | +0.10R |
+| Total | +26.7R |
+| Max drawdown | ~14R |
+| Frequency | 0.93 trades/day |
 
-Honest notes: Q3 2026 was a losing quarter. Excludes spread/commission/slippage —
-live results **will be worse**. 265 trades is a medium sample. These numbers
-are not a promise.
+Honest notes: the no-filter + dual-trigger + touch-entry combo was NOT
+backtested — only the close-confirmed pattern version above. Q3 2026 was a
+losing quarter. Excludes spread/commission/slippage — live results **will be
+worse**. These numbers are not a promise. The journal judges.
+
+Superseded: v1.2 (Donchian + H4 + EMA-H1 filter, PF 1.38) and v2.0
+(double top/bottom with M15+H1 EMA agreement filter, PF 1.22).
 
 ## Architecture
 
 ```
 scripts/
-├── xauusd_entry_m5.sh    # Core engine: 5-min polling, signal detection, alerts
+├── xauusd_entry_m5.sh    # M5 engine (legacy single-TF; kept for compatibility)
+├── xauusd_entry_tf.sh    # Core engine: parameterized by TF env var (m1/m5/m15)
+├── xauusd_entry_m1.sh    # M1 wrapper (TF=m1, 60s poll)
+├── xauusd_entry_m15.sh   # M15 wrapper (TF=m15, 300s poll)
 ├── xauusd_tg_cmd.sh      # Telegram command handler (/check, /chart, /history, ...)
-├── make_chart.py         # Entry chart renderer (matplotlib): Donchian + SL/TP levels
+├── make_chart.py         # Entry chart renderer: pattern/Donchian + SL/TP levels
 ├── entry_scoreboard.py   # Learning loop: scores every signal, weekly review
 ├── xauusd_watchdog.py    # Dead man's switch: keeps the system alive
 └── send_tg.py            # Telegram sender (direct Bot API)
 
 data/
-├── xauusd_ohlc.py        # XAU/USD price feed (Twelve Data, Kraken PAXGUSD fallback)
+├── xauusd_ohlc.py        # XAU/USD price feed (Twelve Data 1min/5min/15min/1h, Kraken fallback)
 ├── forex_news.py         # Forex news headlines (Finnhub) — keyword warnings
 └── release_calendar.py   # Economic calendar: NFP/CPI/PPI/GDP (FRED)
 

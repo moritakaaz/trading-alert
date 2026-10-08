@@ -1,10 +1,11 @@
 #!/bin/bash
-# XAUUSD M5 entry alerts (v2.1 brutal): double top/bottom TOUCH entry +
-# Donchian(48) H1 second trigger, no trend filter
-# on M5 close, M15+H1 EMA20/50 agreement filter. SL/TP from H1 ATR(14).
+# XAUUSD multi-timeframe entry alerts (v2.1 brutal): double top/bottom +
+# Donchian(48) H1 second trigger, no trend filter. Parameterized by TF env var
+# (m1|m5|m15). SL/TP from H1 ATR(14).
 # Price: Twelve Data XAU/USD (fallback Kraken PAXGUSD). News: Finnhub forex headlines.
 # Signal per confirmation bar, forex hours only, deduped by signal bar.
-STATE_FILE="$HOME/hooks/state/xauusd_entry_m5.json"
+TF="${TF:-m5}"
+STATE_FILE="$HOME/hooks/state/xauusd_entry_${TF}.json"
 TD_CLI="$HOME/workspace/skills/twelve-data/bin/xauusd_ohlc.py"
 FN_CLI="$HOME/workspace/skills/finnhub/bin/forex_news.py"
 FRED_CLI="$HOME/workspace/skills/fred/bin/release_calendar.py"
@@ -14,6 +15,17 @@ python3 - "$STATE_FILE" "$TD_CLI" "$FN_CLI" "$FRED_CLI" <<'PYEOF'
 import json, sys, time, subprocess, urllib.request, datetime, re, os
 
 STATE_FILE, TD_CLI, FN_CLI, FRED_CLI = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+
+# ---- multi-timeframe config (TF env var: m1|m5|m15, default m5) ----
+TF = os.environ.get("TF", "m5").lower()
+if TF not in ("m1", "m5", "m15"):
+    TF = "m5"
+TF_SECS = {"m1": 60, "m5": 300, "m15": 900}[TF]
+TF_INTERVAL = {"m1": "1min", "m5": "5min", "m15": "15min"}[TF]
+TF_BARS = {"m1": 600, "m5": 300, "m15": 200}[TF]
+KRAKEN_INT = {"m1": 1, "m5": 5, "m15": 15}[TF]
+HOOK_ID = f"xauusd-entry-{TF}"
+TF_UP = TF.upper()
 
 def out(decision, reason, payload=None):
     print("HATCH_HOOK_RESULT:" + json.dumps(
@@ -88,11 +100,15 @@ def save_journal_rows(update_fn):
                     rows = list(reader)
             if update_fn(rows) is False:
                 return False
-            # ensure strategy_v column exists
+            # ensure strategy_v / timeframe columns exist
             if fieldnames and "strategy_v" not in fieldnames:
                 fieldnames = fieldnames + ["strategy_v"]
                 for r in rows:
                     r.setdefault("strategy_v", "1.0")
+            if fieldnames and "timeframe" not in fieldnames:
+                fieldnames = fieldnames + ["timeframe"]
+                for r in rows:
+                    r.setdefault("timeframe", "m5")
             if not fieldnames and rows:
                 fieldnames = list(rows[0].keys())
             if fieldnames:
@@ -167,11 +183,11 @@ def tg_send(text, photo=None, caption=None, silent=False, keyboard=None):
             if attempt == 0:
                 time.sleep(3)
         if sent:
-            log("xauusd-entry-m5", "tg-sent")
+            log(HOOK_ID, "tg-sent")
         else:
-            log("xauusd-entry-m5", "tg-fail:sendMessage-failed-2x")
+            log(HOOK_ID, "tg-fail:sendMessage-failed-2x")
     except Exception as ex:
-        log("xauusd-entry-m5", f"tg-fail:{str(ex)[:60]}")
+        log(HOOK_ID, f"tg-fail:{str(ex)[:60]}")
 
 # inline keyboard for entry alerts: chart / status / pause / off
 ALERT_KB = {"inline_keyboard": [
@@ -187,7 +203,7 @@ wd, hm = utc.weekday(), utc.hour + utc.minute / 60.0
 # forex hours: Sun 22:00 -> Fri 21:00 UTC, skip daily break 21:00-22:00
 # NOTE: xauusd_watchdog.py has a duplicate in_forex_hours() — keep in sync.
 if wd == 5 or (wd == 6 and hm < 22) or (wd == 4 and hm >= 21) or (21 <= hm < 22):
-    log("xauusd-entry-m5", "market-closed"); out("silent", "market-closed")
+    log(HOOK_ID, "market-closed"); out("silent", "market-closed")
 
 # master on/off switch (toggled by !alert on/off on WA and /alert_on/off on TG)
 try:
@@ -195,7 +211,7 @@ try:
 except Exception:
     _s0 = {}
 if not _s0.get("alert_on", True):
-    log("xauusd-entry-m5", "alert-off"); out("silent", "alert-off")
+    log(HOOK_ID, "alert-off"); out("silent", "alert-off")
 
 def td_ohlc(interval, n):
     r = subprocess.run([TD_CLI, "--interval", interval, "--outputsize", str(n)],
@@ -216,31 +232,31 @@ def kraken(pair, interval, n=720):
 
 src = "Twelve Data XAU/USD"
 try:
-    m5 = td_ohlc("5min", 300)  # v2.0: 300 bars for double top/bottom pattern history
+    tfbars = td_ohlc(TF_INTERVAL, TF_BARS)  # pattern history for this TF
     h1 = td_ohlc("1h", 80)
 except Exception as e:
-    log("xauusd-entry-m5", f"twelvedata-fail:{str(e)[:80]}")
+    log(HOOK_ID, f"twelvedata-fail:{str(e)[:80]}")
     try:
-        m5 = kraken("PAXGUSD", 5); h1 = kraken("PAXGUSD", 60)
+        tfbars = kraken("PAXGUSD", KRAKEN_INT); h1 = kraken("PAXGUSD", 60)
         src = "Kraken PAXGUSD (fallback)"
     except Exception as e2:
-        log("xauusd-entry-m5", "all-price-fail"); out("silent", "price-fetch-failed")
+        log(HOOK_ID, "all-price-fail"); out("silent", "price-fetch-failed")
 
 # last CLOSED bars
-m5b = now - (now % 300)
-closed5 = [b for b in m5 if b[0] < m5b]
-if len(closed5) < 3:
-    log("xauusd-entry-m5", "not-enough-m5"); out("silent", "not-enough-data")
-sig_bar, prev_bar = closed5[-1], closed5[-2]
+tfb = now - (now % TF_SECS)
+closed_tf = [b for b in tfbars if b[0] < tfb]
+if len(closed_tf) < 3:
+    log(HOOK_ID, "not-enough-tf"); out("silent", "not-enough-data")
+sig_bar, prev_bar = closed_tf[-1], closed_tf[-2]
 bar_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(sig_bar[0]))
-if now - sig_bar[0] > 900:  # bar older than 15 min -> stale
-    log("xauusd-entry-m5", "stale-bar"); out("silent", "stale-bar")
+if now - sig_bar[0] > TF_SECS * 3:  # stale bar guard
+    log(HOOK_ID, "stale-bar"); out("silent", "stale-bar")
 
 # completed H1 bars strictly before the signal bar's hour
 hour_start = sig_bar[0] - (sig_bar[0] % 3600)
 h1c = [b for b in h1 if b[0] < hour_start]
 if len(h1c) < 62:
-    log("xauusd-entry-m5", "not-enough-h1"); out("silent", "not-enough-data")
+    log(HOOK_ID, "not-enough-h1"); out("silent", "not-enough-data")
 
 def atr14(bars):
     # ATR(14) over the last 14 completed H1 bars; bars=[(t,o,h,l,c),...] oldest-first
@@ -259,32 +275,9 @@ def _ema(vals, period):
 
 a1 = atr14(h1c)
 if a1 <= 0:
-    log("xauusd-entry-m5", "bad-atr"); out("silent", "bad-atr")
+    log(HOOK_ID, "bad-atr"); out("silent", "bad-atr")
 
-# --- v2.0: M15 trend (resampled from M5) for the agreement filter ---
-m15_trend = None
-try:
-    _m15 = []
-    _bkt = None
-    for _b in closed5:
-        _mb = _b[0] - (_b[0] % 900)
-        if _bkt is None or _bkt[0] != _mb:
-            if _bkt:
-                _m15.append(_bkt)
-            _bkt = [_mb, _b[1], _b[2], _b[3], _b[4]]
-        else:
-            _bkt[2] = max(_bkt[2], _b[2])
-            _bkt[3] = min(_bkt[3], _b[3])
-            _bkt[4] = _b[4]
-    if _bkt:
-        _m15.append(_bkt)
-    _m15_now = now - (now % 900)
-    _m15c = [_b[4] for _b in _m15 if _b[0] < _m15_now]
-    if len(_m15c) >= 55:
-        _d15 = _ema(_m15c, 20) - _ema(_m15c, 50)
-        m15_trend = "BULLISH" if _d15 > 0 else ("BEARISH" if _d15 < 0 else None)
-except Exception as ex:
-    log("xauusd-entry-m5", f"m15-trend-fail:{str(ex)[:40]}")
+# (v2.1: M15 trend block removed — filter was dropped; H1 EMA kept for display)
 
 # --- v2.1 brutal double top/bottom detector ---
 # Pattern: two M5 fractal peaks/valleys (N=2), |p1-p2| <= 0.25*ATR(H1),
@@ -294,11 +287,11 @@ except Exception as ex:
 # back means the level HELD — firing on it catches traps, not breakouts).
 # No lookahead: every bar referenced is closed at signal time.
 def detect_dtb():
-    n = len(closed5)
+    n = len(closed_tf)
     if n < 80 or a1 <= 0:
         return None, None
-    H = [b[2] for b in closed5]
-    L = [b[3] for b in closed5]
+    H = [b[2] for b in closed_tf]
+    L = [b[3] for b in closed_tf]
     is_peak = [False] * n
     is_valley = [False] * n
     for i in range(2, n - 2):
@@ -307,7 +300,7 @@ def detect_dtb():
         if L[i] < L[i-1] and L[i] < L[i-2] and L[i] < L[i+1] and L[i] < L[i+2]:
             is_valley[i] = True
     k = n - 1  # sig_bar: must be the confirmation candle
-    so, sc = closed5[k][1], closed5[k][4]
+    so, sc = closed_tf[k][1], closed_tf[k][4]
     # double tops -> SELL
     for p2 in range(max(2, k - 24), k):
         if not is_peak[p2]:
@@ -336,7 +329,7 @@ def detect_dtb():
         if sc < vlo and sc < so:  # close below neckline + red
             return "SELL", {"kind": "DOUBLE TOP", "p1": H[p1],
                             "p2": H[p2], "neck": vlo,
-                            "p2_t": closed5[p2][0]}
+                            "p2_t": closed_tf[p2][0]}
     # double bottoms -> BUY
     for p2 in range(max(2, k - 24), k):
         if not is_valley[p2]:
@@ -363,7 +356,7 @@ def detect_dtb():
         if sc > vhi and sc > so:  # close above neckline + green
             return "BUY", {"kind": "DOUBLE BOTTOM", "p1": L[p1],
                            "p2": L[p2], "neck": vhi,
-                           "p2_t": closed5[p2][0]}
+                           "p2_t": closed_tf[p2][0]}
     return None, None
 
 sig, pattern = detect_dtb()
@@ -390,7 +383,7 @@ try:
     _d = _ema(_closes, 20) - _ema(_closes, 50)
     ema_trend = "BULLISH" if _d > 0 else ("BEARISH" if _d < 0 else None)
 except Exception as ex:
-    log("xauusd-entry-m5", f"ema-filter-fail:{str(ex)[:40]}")
+    log(HOOK_ID, f"ema-filter-fail:{str(ex)[:40]}")
 
 try:
     st = json.load(open(STATE_FILE))
@@ -403,11 +396,11 @@ def heartbeat_maybe(reason):
     # (this script only runs when the hook is enabled; user explicitly
     # asked for every-few-minutes pings and doesn't mind the spam)
     if now - st.get("last_heartbeat", 0) < 300:
-        log("xauusd-entry-m5", reason); out("silent", reason)
+        log(HOOK_ID, reason); out("silent", reason)
     try:
         day = datetime.datetime.fromtimestamp(now, datetime.timezone.utc).strftime("%Y-%m-%d")
         n = 0
-        with open(os.path.expanduser("~/hooks/logs/xauusd-entry-m5.jsonl")) as f:
+        with open(os.path.expanduser(f"~/hooks/logs/{HOOK_ID}.jsonl")) as f:
             for line in f:
                 try:
                     ts = json.loads(line).get("started_at_ms", 0) / 1000
@@ -426,7 +419,7 @@ def heartbeat_maybe(reason):
     active, closed_kind = resolve_active_trade()
     resolve_runner()  # v1.3: post-TP1 runner watch (TP2/TP3/BE alerts)
     if closed_kind in ("SL", "TP1", "expired"):
-        log("xauusd-entry-m5", f"heartbeat-skipped-after-{closed_kind.lower()}")
+        log(HOOK_ID, f"heartbeat-skipped-after-{closed_kind.lower()}")
         out("silent", f"trade-closed-{closed_kind.lower()}-notified")
     at = st.get("active_trade")
     extra = ""
@@ -444,9 +437,10 @@ def heartbeat_maybe(reason):
     elif closed_kind in ("SL", "TP1"):
         extra = (f"\n{'🛑 SL' if closed_kind == 'SL' else '🎯 TP1'} hit — "
                  f"position closed, ready for new signals")
-    msg = (f"🟢 Entry alert ACTIVE — {n}x checks today, no BUY/SELL signal yet\n"
-           f"(last check {wib_now} WIB). Type /alert_off to stop.{extra}")
-    log("xauusd-entry-m5", "heartbeat")
+    _off_cmd = "/alert_off" if TF == "m5" else f"/alert_off_{TF}"
+    msg = (f"🟢 Entry alert ACTIVE ({TF_UP}) — {n}x checks today, no BUY/SELL signal yet\n"
+           f"(last check {wib_now} WIB). Type {_off_cmd} to stop.{extra}")
+    log(HOOK_ID, "heartbeat")
     tg_send(msg, silent=True)  # heartbeat: no sound, so entries stand out
     out("wake", "heartbeat", {"message": msg, "polls_today": n,
                               "trade_closed": closed_kind})
@@ -482,15 +476,15 @@ def resolve_active_trade():
                       "bar_ts": bar_ts, "ts": bar_ts}
                 st["active_trade"] = at
                 save_state_keys({"active_trade": at})
-                log("xauusd-entry-m5", "active-trade-healed-from-journal")
+                log(HOOK_ID, "active-trade-healed-from-journal")
         except Exception as ex:
-            log("xauusd-entry-m5", f"heal-fail:{str(ex)[:40]}")
+            log(HOOK_ID, f"heal-fail:{str(ex)[:40]}")
     if not at:
         return False, None
     if now - at.get("ts", 0) > 172800:  # 48h expiry, same as scoreboard
         st["active_trade"] = None
         save_state_keys({"active_trade": None})
-        log("xauusd-entry-m5", "active-trade-expired")
+        log(HOOK_ID, "active-trade-expired")
         # also close the journal so self-heal doesn't resurrect it.
         # FIX #2: calculate actual R from last close, not hardcoded 0.
         def _expire_update(rows):
@@ -507,7 +501,7 @@ def resolve_active_trade():
                         "%Y-%m-%dT%H:%M:%SZ")
                     # actual R from last available close
                     try:
-                        _last = m5[-1][4] if m5 else at["entry"]
+                        _last = tfbars[-1][4] if tfbars else at["entry"]
                         _m = 1 if at["signal"] == "BUY" else -1
                         _pnl = (_last - at["entry"]) * _m
                         _r["r_multiple"] = str(round(_pnl / at["sl_d"], 2))
@@ -518,9 +512,9 @@ def resolve_active_trade():
         try:
             save_journal_rows(_expire_update)
         except Exception as _ex:
-            log("xauusd-entry-m5", f"journal-expire-fail:{str(_ex)[:40]}")
+            log(HOOK_ID, f"journal-expire-fail:{str(_ex)[:40]}")
         return False, "expired"
-    bars = [b for b in m5 if b[0] > at["bar_ts"]]
+    bars = [b for b in tfbars if b[0] > at["bar_ts"]]
     if not bars:
         return True, None
     entry, sl_d, tp1_d = at["entry"], at["sl_d"], at["tp1_d"]
@@ -539,7 +533,7 @@ def resolve_active_trade():
     if close_kind:
         st["active_trade"] = None
         save_state_keys({"active_trade": None})
-        log("xauusd-entry-m5", f"active-trade-closed:{close_kind.lower()}")
+        log(HOOK_ID, f"active-trade-closed:{close_kind.lower()}")
         # FIX #1 (2026-10-05): close the journal entry NOW under lock, not
         # just in the daily scoreboard. Otherwise self-heal resurrects the
         # trade from the still-open journal row and re-sends the
@@ -564,7 +558,7 @@ def resolve_active_trade():
         try:
             save_journal_rows(_close_update)
         except Exception as _ex:
-            log("xauusd-entry-m5", f"journal-close-fail:{str(_ex)[:40]}")
+            log(HOOK_ID, f"journal-close-fail:{str(_ex)[:40]}")
         mult = 1 if at["signal"] == "BUY" else -1
         _m = st.get("modal") or {"amount": 600, "currency": "usc"}
         _ma = float(_m.get("amount") or 600)
@@ -606,7 +600,7 @@ def resolve_active_trade():
                             "tp1_ts": now, "bar_ts": at.get("bar_ts", 0),
                             "sig_ts": at.get("ts", 0), "notified": ["TP1"]}
             save_state_keys({"runner": st["runner"]})
-            log("xauusd-entry-m5", "runner-tracking-started")
+            log(HOOK_ID, "runner-tracking-started")
         return False, close_kind
     return True, None
 
@@ -620,9 +614,9 @@ def resolve_runner():
     if now - rn.get("sig_ts", 0) > 172800:  # 48h expiry from original signal
         st["runner"] = None
         save_state_keys({"runner": None})
-        log("xauusd-entry-m5", "runner-expired")
+        log(HOOK_ID, "runner-expired")
         return False
-    bars = [b for b in m5 if b[0] > rn["tp1_ts"]]
+    bars = [b for b in tfbars if b[0] > rn["tp1_ts"]]
     if not bars:
         return True
     sig, entry = rn["signal"], rn["entry"]
@@ -660,7 +654,7 @@ def resolve_runner():
                 f"💰 +{rn['tp2_d']} {_mu} (+1.5R, +{pct:.1f}% of balance) @ ${px}\n"
                 f"📌 Runner still going to TP3")
         notified = notified + ["TP2"]
-        log("xauusd-entry-m5", "runner-tp2")
+        log(HOOK_ID, "runner-tp2")
     elif hit == "TP3":
         px = int(round(tp3_px))
         pct = (rn["tp3_d"] / _ma * 100) if _ma > 0 else 0
@@ -668,12 +662,12 @@ def resolve_runner():
                 f"💰 +{rn['tp3_d']} {_mu} (+2R, +{pct:.1f}% of balance) @ ${px}\n"
                 f"✅ Runner done — consider closing the position")
         notified = list(set(notified + ["TP2", "TP3"]))
-        log("xauusd-entry-m5", "runner-tp3")
+        log(HOOK_ID, "runner-tp3")
     else:  # BE
         tg_send(f"🛑 Runner hit breakeven — {sig} @ ${entry}\n"
                 f"💸 0R on the runner (TP1 +1R already locked in)")
         notified = notified + ["BE"]
-        log("xauusd-entry-m5", "runner-breakeven")
+        log(HOOK_ID, "runner-breakeven")
     if hit in ("TP2", "TP3"):
         # journal max_tp upgrade (informational; scoreboard recomputes anyway)
         def _runner_update(rows):
@@ -690,7 +684,7 @@ def resolve_runner():
         try:
             save_journal_rows(_runner_update)
         except Exception as _ex:
-            log("xauusd-entry-m5", f"journal-runner-fail:{str(_ex)[:40]}")
+            log(HOOK_ID, f"journal-runner-fail:{str(_ex)[:40]}")
     done = hit in ("TP3", "BE")
     st["runner"] = None if done else dict(rn, notified=notified)
     save_state_keys({"runner": st["runner"]})
@@ -700,21 +694,21 @@ if sig is None:
     heartbeat_maybe("no-signal")
 
 if st.get("last_bar") == bar_iso:
-    log("xauusd-entry-m5", "dup"); out("silent", "already-alerted")
+    log(HOOK_ID, "dup"); out("silent", "already-alerted")
 
 # v2.1: one signal per pattern (same as the backtest's used_p2 dedupe).
 # Without this, every bar closing beyond the neckline re-triggers.
 if pattern and st.get("pattern_p2_t") == pattern.get("p2_t"):
-    log("xauusd-entry-m5", "dup-pattern"); out("silent", "already-alerted-pattern")
+    log(HOOK_ID, "dup-pattern"); out("silent", "already-alerted-pattern")
 
 # pause check (inline keyboard "⏸️ Pause 1h"): suppress signals but not
 # the heartbeat, so he still sees liveness while paused
 if st.get("paused_until", 0) > now:
     heartbeat_maybe("paused")
-    log("xauusd-entry-m5", "signal-paused")
+    log(HOOK_ID, "signal-paused")
 
 # v2.1 brutal: trend filter REMOVED — every signal fires, both directions.
-# (ema_trend/m15_trend are still computed above; shown in the alert intel
+# (ema_trend is still computed above; shown in the alert intel
 # block for context only, never blocking.)
 
 # one position at a time: suppress new signals while the previous trade is
@@ -782,7 +776,7 @@ try:
     if future and not cal_lines:
         cal_lines.append(f"📅 Next: {future[0]['name']} {future[0]['date']}")
 except Exception as ex:
-    log("xauusd-entry-m5", f"cal-fail:{str(ex)[:60]}")
+    log(HOOK_ID, f"cal-fail:{str(ex)[:60]}")
 
 # --- news (Finnhub, best effort) ---
 headlines, warn = [], False
@@ -801,7 +795,7 @@ try:
             if hot.search(hl):
                 warn = True
 except Exception as e:
-    log("xauusd-entry-m5", f"news-fail:{str(e)[:60]}")
+    log(HOOK_ID, f"news-fail:{str(e)[:60]}")
 
 # --- trading intelligence (informational only, NOT backtested) ---
 # These add context to the alert; they never block or change the signal.
@@ -826,14 +820,11 @@ try:
     if (sig_bar[2] - sig_bar[3]) > 1.5 * a1:
         intel_lines.append("⚠️ Abnormal signal candle (range > 1.5x H1 ATR) — consider wait & see")
 except Exception as ex:
-    log("xauusd-entry-m5", f"intel-session-fail:{str(ex)[:40]}")
+    log(HOOK_ID, f"intel-session-fail:{str(ex)[:40]}")
 
-# v2.1: H1 + M15 EMA20/50 shown for context only (filter removed).
-# Signals reaching here passed the filter; this is confirmation.
+# v2.1: H1 EMA20/50 shown for context only (filter removed).
 if ema_trend:
     intel_lines.append(f"📊 H1 EMA20/50: {ema_trend}")
-if m15_trend:
-    intel_lines.append(f"📊 M15 EMA20/50: {m15_trend}")
 
 # retest zone: the pattern neckline (natural retest area for the breakout)
 try:
@@ -882,9 +873,9 @@ try:
     if lvl_warn:
         intel_lines.append("⚠️ Level: " + " | ".join(lvl_warn))
 except Exception as ex:
-    log("xauusd-entry-m5", f"intel-lvl-fail:{str(ex)[:40]}")
+    log(HOOK_ID, f"intel-lvl-fail:{str(ex)[:40]}")
 
-lines = [f"🚨 ENTRY XAUUSD (M5): {dir_emoji} {sig}",
+lines = [f"🚨 ENTRY XAUUSD ({TF_UP}): {dir_emoji} {sig}",
          f"📐 Pattern: {pattern['kind']}" +
          (" + neckline break" if pattern['kind'] in ("DOUBLE TOP", "DOUBLE BOTTOM")
           else " (H1 channel)"),
@@ -909,7 +900,7 @@ lines.extend([
 # fallback transparency: Kraken PAXGUSD is a proxy, not XAU/USD directly
 if "fallback" in src.lower():
     lines.append("⚠️ [FALLBACK] Price from Kraken PAXGUSD, not XAU/USD directly")
-    log("xauusd-entry-m5", "alert-on-fallback-feed")
+    log(HOOK_ID, "alert-on-fallback-feed")
 lines.extend(cal_lines)
 if warn:
     lines.append("\u26A0\uFE0F Headline mentions a high-impact event (NFP/CPI/FOMC) — watch out for volatility")
@@ -928,11 +919,11 @@ try:
     os.makedirs(chart_dir, exist_ok=True)
     chart_path = os.path.join(chart_dir, f"entry_{bar_iso}.png")
     chart_in = {
-        "bars": [{"t": b[0], "o": b[1], "h": b[2], "l": b[3], "c": b[4]} for b in closed5],
+        "bars": [{"t": b[0], "o": b[1], "h": b[2], "l": b[3], "c": b[4]} for b in closed_tf],
         "pattern": {k: pattern[k] for k in
                     ("kind", "p1", "p2", "neck", "upper", "lower")
                     if k in pattern},
-        "signal": sig, "entry": price,
+        "signal": sig, "entry": price, "tf": TF_UP,
         "sl": sl_d, "tp1": tp1_d, "tp2": tp2_d, "tp3": tp3_d,
         "bar_time_wib": datetime.datetime.fromtimestamp(sig_bar[0], datetime.timezone.utc)
                          .astimezone(WIB).strftime("%d %b %H:%M"),
@@ -951,9 +942,9 @@ try:
         for old in files[:-20]:
             os.remove(old)
     else:
-        log("xauusd-entry-m5", f"chart-fail:{r.stderr[:80]}")
+        log(HOOK_ID, f"chart-fail:{r.stderr[:80]}")
 except Exception as ex:
-    log("xauusd-entry-m5", f"chart-fail:{str(ex)[:80]}")
+    log(HOOK_ID, f"chart-fail:{str(ex)[:80]}")
 
 st["last_bar"] = bar_iso
 # track the open trade so new signals are suppressed until SL/TP1/48h
@@ -974,22 +965,24 @@ if os.environ.get("HATCH_HOOK_DRY_RUN") != "1":
         row = {"alert_time_utc": bar_iso, "signal": sig, "entry_ref": price,
                "sl_d": sl_d, "tp1_d": tp1_d, "tp2_d": tp2_d, "tp3_d": tp3_d,
                "status": "open", "outcome": "", "closed_time_utc": "",
-               "max_tp": "", "r_multiple": "", "strategy_v": sv}
-        # backfill strategy_v for old rows missing it
+               "max_tp": "", "r_multiple": "", "strategy_v": sv,
+               "timeframe": TF}
+        # backfill strategy_v / timeframe for old rows missing them
         for r in rows:
             r.setdefault("strategy_v", "1.0")
+            r.setdefault("timeframe", "m5")
         rows.append(row)
         return True
     try:
         save_journal_rows(_append_signal)
     except Exception as ex:
-        log("xauusd-entry-m5", f"journal-fail:{str(ex)[:60]}")
-log("xauusd-entry-m5", f"wake-{sig.lower()}")
+        log(HOOK_ID, f"journal-fail:{str(ex)[:60]}")
+log(HOOK_ID, f"wake-{sig.lower()}")
 # push to Telegram (direct, reliable) in addition to the side-chat worker wake
 tg_send(msg, photo=chart_path,
-        caption=f"📊 XAUUSD M5 Chart — {sig} @ ~${price}",
+        caption=f"📊 XAUUSD {TF_UP} Chart — {sig} @ ~${price}",
         keyboard=ALERT_KB)
-out("wake", f"xauusd-entry-{sig.lower()}-m5",
+out("wake", f"{HOOK_ID}-{sig.lower()}",
     {"signal": sig, "price": price, "bar_time_utc": bar_iso,
      "atr_h1": round(a1, 2), "sl_distance": sl_d,
      "tp1_distance": tp1_d, "tp2_distance": tp2_d, "tp3_distance": tp3_d,
@@ -999,4 +992,4 @@ out("wake", f"xauusd-entry-{sig.lower()}-m5",
      "chart": chart_url,
      "message": msg})
 PYEOF
-echo "HATCH_HOOK_LOG:{\"message\":\"xauusd-entry-m5\",\"reason\":\"script-end\"}" >&2
+echo "HATCH_HOOK_LOG:{\"message\":\"xauusd-entry-${TF}\",\"reason\":\"script-end\"}" >&2

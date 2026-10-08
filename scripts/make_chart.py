@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Render an XAUUSD M5 entry chart: candles + Donchian channel + SL/TP levels.
+"""Render an XAUUSD M5 entry chart: candles + pattern + SL/TP levels.
 
 Usage: make_chart.py <input.json>
 input.json: {"bars":[{"t":epoch,"o":..,"h":..,"l":..,"c":..}...] (M5 oldest-first),
-  "upper": float, "lower": float, "signal": "BUY"|"SELL"|"NOW",
+  "pattern": {"kind": "DOUBLE TOP"|"DOUBLE BOTTOM", "p1": float, "p2": float,
+              "neck": float} (optional, v2.0),
+  "signal": "BUY"|"SELL"|"NOW",
   "entry": float, "sl": dist, "tp1": dist, "tp2": dist, "tp3": dist,
   "bar_time_wib": "05 Oct 11:25", "out": "/path/to.png"}
 "NOW" mode draws a live price line instead of SL/TP/entry marker (sl/tp keys optional).
@@ -51,16 +53,36 @@ def main():
                                    color=col, zorder=3))
 
     lo, hi = min(lows), max(highs)
-    lvls = ([sl_lv] + [v for _, v in tp_vals] if not is_now else []) + [d["upper"], d["lower"]]
+    lvls = ([sl_lv] + [v for _, v in tp_vals] if not is_now else [])
+    pat = d.get("pattern")
+    if pat:
+        lvls.append(pat["neck"])
+        # v2.1: include both Donchian bands in the y-range
+        if pat.get("kind") == "DONCHIAN BREAKOUT":
+            lvls += [pat["upper"], pat["lower"]]
     if not is_now:
         lvls.append(closes[-1])  # NOW price line level
-    lo, hi = min(lo, min(lvls)), max(hi, max(lvls))
+    if lvls:
+        lo, hi = min(lo, min(lvls)), max(hi, max(lvls))
     pad = (hi - lo) * 0.12 or 1.0
-    # Donchian channel
-    ax.axhline(d["upper"], color="#1e88e5", ls="--", lw=1.2, alpha=0.9)
-    ax.axhline(d["lower"], color="#1e88e5", ls="--", lw=1.2, alpha=0.9)
-    ax.text(xs[-1], d["upper"], "  Donchian upper", color="#1e88e5", va="bottom", fontsize=9)
-    ax.text(xs[-1], d["lower"], "  Donchian lower", color="#1e88e5", va="top", fontsize=9)
+    # v2.0 pattern: neckline + kind label
+    # label on the LEFT edge to avoid clashing with the right-edge SL/TP/entry labels
+    _is_donch = pat and pat.get("kind") == "DONCHIAN BREAKOUT" and "upper" in pat
+    if pat and not _is_donch:
+        ax.axhline(pat["neck"], color="#ff9800", ls=":", lw=1.5, alpha=0.9)
+        ax.text(xs[0], pat["neck"], f"neckline ${pat['neck']:.0f} ({pat['kind']})  ",
+                color="#ff9800", va="bottom", ha="left", fontsize=9,
+                bbox=dict(fc="white", ec="none", alpha=0.7, pad=1))
+    # v2.1 brutal: Donchian channel (both bands) for DONCHIAN BREAKOUT signals
+    if _is_donch:
+        ax.axhline(pat["upper"], color="#ff9800", ls=":", lw=1.2, alpha=0.7)
+        ax.text(xs[0], pat["upper"], f"Donchian upper ${pat['upper']:.0f}  ",
+                color="#ff9800", va="bottom", ha="left", fontsize=9,
+                bbox=dict(fc="white", ec="none", alpha=0.7, pad=1))
+        ax.axhline(pat["lower"], color="#ff9800", ls=":", lw=1.2, alpha=0.7)
+        ax.text(xs[0], pat["lower"], f"Donchian lower ${pat['lower']:.0f}  ",
+                color="#ff9800", va="top", ha="left", fontsize=9,
+                bbox=dict(fc="white", ec="none", alpha=0.7, pad=1))
     if not is_now:
         # SL / TPs (dimmed dashed when historical) — labels show PRICES
         sl_col = "#9e9e9e" if is_hist else "#d32f2f"
@@ -92,14 +114,14 @@ def main():
             else:
                 ax.axhspan(entry, sl_lv, color="#d32f2f", alpha=0.06, zorder=1)
                 ax.axhspan(tp1_v, entry, color="#2e7d32", alpha=0.06, zorder=1)
-        # breakout marker: vertical dotted line at the signal bar (if known)
+        # signal marker: vertical dotted line at the signal bar (if known)
         sig_t = d.get("sig_t")
         if sig_t:
             bts = [b["t"] for b in bars]
             idx = min(range(len(bts)), key=lambda i: abs(bts[i] - sig_t))
             if abs(bts[idx] - sig_t) < 7200:  # signal bar within chart range
                 ax.axvline(xs[idx], color="#ff9800", ls=":", lw=1.3, alpha=0.85, zorder=4)
-                ax.text(xs[idx], hi + pad * 0.02, " ▼ breakout", color="#ff9800",
+                ax.text(xs[idx], hi + pad * 0.02, " ▼ signal", color="#ff9800",
                         fontsize=8, ha="left", va="bottom",
                         bbox=dict(fc="white", ec="none", alpha=0.7, pad=1))
     # entry marker on last bar (or NOW price line in live mode)
@@ -137,7 +159,8 @@ def main():
     ax.set_xticks(xs[::step])
     ax.set_xticklabels([t.strftime("%H:%M") for t in times[::step]], fontsize=9)
     mode = "LIVE" if is_now else ("HIST" if is_hist else sig)
-    ax.set_title(f"XAUUSD M5 · {mode} · {d['bar_time_wib']} WIB · ${entry:.0f}",
+    _tf = d.get("tf", "M5")  # multi-TF: M1/M5/M15 (default M5 for old callers)
+    ax.set_title(f"XAUUSD {_tf} · {mode} · {d['bar_time_wib']} WIB · ${entry:.0f}",
                  fontsize=13, fontweight="bold", loc="left", pad=12)
     ax.grid(True, alpha=0.25)
     for spine in ax.spines.values():

@@ -15,7 +15,7 @@ CRED = "custom.twelve-data"
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--interval", required=True, choices=["5min", "1h"])
+    ap.add_argument("--interval", required=True, choices=["1min", "5min", "15min", "1h"])
     ap.add_argument("--outputsize", type=int, default=60)
     a = ap.parse_args()
     base = (f"https://api.twelvedata.com/time_series?symbol=XAU/USD"
