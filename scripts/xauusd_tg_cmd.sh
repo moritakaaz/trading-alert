@@ -515,6 +515,7 @@ def trend_text():
     m15_trend = "BULLISH" if m15_d > 0 else "BEARISH"
     now_px = h1c[-1]
     # B08: this is last CLOSED H1 bar, not live price
+    WIB = datetime.timezone(datetime.timedelta(hours=7))
     _h1_t = datetime.datetime.fromtimestamp(h1[-1][0], datetime.timezone.utc).astimezone(WIB).strftime("%H:%M")
     e1 = "🟢" if h1_trend == "BULLISH" else "🔴"
     em = "🟢" if m15_trend == "BULLISH" else "🔴"
