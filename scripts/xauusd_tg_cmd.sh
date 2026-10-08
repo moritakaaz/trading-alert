@@ -971,7 +971,16 @@ def handle(text):
         st0 = load_state()
         modal = st0.get("modal") or {"amount": 600, "currency": "usc"}
         bal = float(modal.get("amount") or 600)
-        unit = "USC" if (modal.get("currency") or "usc") == "usc" else "USD"
+        _cur = (modal.get("currency") or "usc").lower()
+        unit = {"idr": "IDR", "usd": "USD", "usc": "USDc"}.get(_cur, "USDc")
+        # Convert balance to USC for lot math (risk_usc is the base unit)
+        _idr_rate = float((st0.get("_usd_idr_cache") or {}).get("rate") or 16000)
+        if _cur == "idr":
+            _bal_usc = bal / (_idr_rate / 100.0) if _idr_rate > 0 else bal
+        elif _cur == "usd":
+            _bal_usc = bal * 100.0
+        else:
+            _bal_usc = bal
         risk_lim = float(st0.get("risk_pct_limit") or 2.0)
         # B26 (P1): get live H1 ATR from engine state (saved each poll)
         try:
@@ -984,7 +993,7 @@ def handle(text):
         except Exception:
             atr = 12.0  # fallback only if state unreadable
         sl_d = 1.5 * atr
-        max_risk_usc = bal * (risk_lim / 100)
+        max_risk_usc = _bal_usc * (risk_lim / 100)
         # lot for exact risk%: L = max_risk / (SL_d * 100)
         rec_lot = max_risk_usc / (sl_d * 100) if sl_d > 0 else 0.01
         # round down to 0.01 step
@@ -993,7 +1002,7 @@ def handle(text):
         # max lot: 1.5x recommended (aggressive) - still within 1.5x risk
         max_lot = _math.floor(rec_lot * 1.5 * 100) / 100
         lines = [f"📐 <b>Lot Calculator</b>",
-                 f"💰 Balance: {bal:.0f} {unit} | Risk: {risk_lim}%",
+                 f"💰 Balance: {bal:,.0f} {unit} | Risk: {risk_lim}%",
                  f"📊 Est. SL: ${sl_d:.0f} (1.5×ATR~${atr:.0f})",
                  f"",
                  f"✅ <b>Recommended: {rec_lot:.2f} lot</b> (= {risk_lim}% risk)",
@@ -1001,7 +1010,7 @@ def handle(text):
                  f"",
                  f"Lot → Risk:"]
         for _l in [0.01, 0.02, 0.03, 0.05, 0.10]:
-            _r = sl_d * (_l / 0.01) / bal * 100 if bal > 0 else 0
+            _r = sl_d * (_l / 0.01) / _bal_usc * 100 if _bal_usc > 0 else 0
             _mark = " ← you" if abs(_l - float(st0.get("lot_size") or 0.01)) < 0.005 else ""
             lines.append(f"  {_l:.2f} lot → {_r:.1f}%{_mark}")
         return "\n".join(lines)
