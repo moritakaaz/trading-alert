@@ -72,6 +72,20 @@ def tg_send_photo(chat_id, photo_path, caption):
                     f"https://api.telegram.org/bot{tok}/sendPhoto"],
                    capture_output=True, timeout=45)
 
+def tg_send_document(chat_id, doc_path, caption):
+    # document upload via curl (multipart)
+    if DRY:
+        return
+    tok, _ = tg_creds()
+    if not os.path.isfile(doc_path):
+        return
+    subprocess.run(["curl", "-s", "-m", "60",
+                    "-F", "chat_id=" + chat_id,
+                    "-F", "document=@" + doc_path,
+                    "-F", "caption=" + caption,
+                    f"https://api.telegram.org/bot{tok}/sendDocument"],
+                   capture_output=True, timeout=65)
+
 def esc(s):
     return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
@@ -283,7 +297,8 @@ HELP = ("🤖 <b>XAUUSD alert bot commands</b>\n"
         "/check — status + last signal\n"
         "/chart — live XAUUSD chart + data\n"
         "/trend — current H1 & M15 trend\n"
-        "/history — last 10 signals + results\n"
+        "/history — signals + results (paginated)\n"
+        "/export_journal — export CSV by day/week/month/year\n"
         "/set_balance — set balance (e.g. /set_balance 600 usc)\n"
         "/set_risk — set max risk % per trade (e.g. /set_risk 2)\n"
         "/set_lot — set lot size for risk calc (e.g. /set_lot 0.01)\n"
@@ -293,15 +308,21 @@ HELP = ("🤖 <b>XAUUSD alert bot commands</b>\n"
         "/cancel_trade — cancel signal (invalid)\n"
         "/reset_trade — reset a stuck active position (emergency)")
 
-def history_text():
-    """Last 10 journaled signals with outcomes, newest first. Times in WIB."""
+def history_text(page=0):
+    """Journaled signals with outcomes, newest first. Times in WIB. 10 per page."""
     try:
         with open(os.path.expanduser(JOURNAL)) as f:
             rows = list(csv.DictReader(f))
     except Exception:
-        return "❌ No history yet."
+        return "❌ No history yet.", False, False
     if not rows:
-        return "❌ No history yet."
+        return "❌ No history yet.", False, False
+    PER_PAGE = 10
+    total_pages = (len(rows) + PER_PAGE - 1) // PER_PAGE
+    page = max(0, min(page, total_pages - 1))
+    start = len(rows) - (page + 1) * PER_PAGE
+    end = len(rows) - page * PER_PAGE
+    page_rows = rows[max(0, start):end][::-1]
     WIB = datetime.timezone(datetime.timedelta(hours=7))
     def wib(iso):
         try:
@@ -310,8 +331,8 @@ def history_text():
             return dt.astimezone(WIB).strftime("%d %b %H:%M")
         except Exception:
             return (iso or "")[:16]
-    lines = ["📜 <b>Last 10 signals</b>", ""]
-    for r in rows[-10:][::-1]:
+    lines = [f"📜 <b>History</b> (page {page+1}/{total_pages})", ""]
+    for r in page_rows:
         sig_emoji = "🟢" if r["signal"] == "BUY" else "🔴"
         try:
             e = float(r["entry_ref"]); m = 1 if r["signal"] == "BUY" else -1
@@ -349,7 +370,70 @@ def history_text():
         lines.append(f"{sig_emoji} <b>{r['signal']} @ ${r['entry_ref']}</b> ({t}) → {res}")
         if lv:
             lines.append(f"   ┗ {lv}")
-    return "\n".join(lines)
+    has_prev = page > 0
+    has_next = page < total_pages - 1
+    return "\n".join(lines), has_prev, has_next
+
+def send_history_page(chat_id, page=0):
+    """Send history page with pagination buttons."""
+    text, has_prev, has_next = history_text(page)
+    kb = None
+    if has_prev or has_next:
+        buttons = []
+        if has_prev:
+            buttons.append({"text": "« Prev", "callback_data": f"hist:{page-1}"})
+        if has_next:
+            buttons.append({"text": "Next »", "callback_data": f"hist:{page+1}"})
+        kb = {"inline_keyboard": [buttons]}
+    tg_send(chat_id, text, keyboard=kb)
+
+def send_export_picker(chat_id):
+    """Show day/week/month/year picker for journal export."""
+    kb = {"inline_keyboard": [
+        [{"text": "📅 Day", "callback_data": "export:day"},
+         {"text": "📊 Week", "callback_data": "export:week"}],
+        [{"text": "📆 Month", "callback_data": "export:month"},
+         {"text": "🗓️ Year", "callback_data": "export:year"}],
+    ]}
+    tg_send(chat_id, "📤 <b>Export journal</b>\nChoose period:", keyboard=kb)
+
+def export_journal(period):
+    """Export journal filtered by period. Returns (filepath, count) or (None, 0)."""
+    import tempfile
+    try:
+        with open(os.path.expanduser(JOURNAL)) as f:
+            rows = list(csv.DictReader(f))
+    except Exception:
+        return None, 0
+    if not rows:
+        return None, 0
+    now = datetime.datetime.now(datetime.timezone.utc)
+    def in_period(iso):
+        try:
+            dt = datetime.datetime.strptime(
+                (iso or "")[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=datetime.timezone.utc)
+        except Exception:
+            return False
+        if period == "day":
+            return dt.date() == now.date()
+        elif period == "week":
+            # last 7 days
+            return (now - dt).days < 7
+        elif period == "month":
+            return dt.year == now.year and dt.month == now.month
+        elif period == "year":
+            return dt.year == now.year
+        return False
+    filtered = [r for r in rows if in_period(r.get("alert_time_utc", ""))]
+    if not filtered:
+        return None, 0
+    # write to temp file
+    fd, path = tempfile.mkstemp(suffix=f"_journal_{period}.csv", prefix="export_")
+    with os.fdopen(fd, 'w', newline='') as f:
+        w = csv.DictWriter(f, fieldnames=rows[0].keys())
+        w.writeheader()
+        w.writerows(filtered)
+    return path, len(filtered)
 
 def td_ohlc(interval, n):
     r = subprocess.run([TD_CLI, "--interval", interval, "--outputsize", str(n)],
@@ -545,6 +629,31 @@ def handle_callback(data):
             tg_send(chat_id, cap_or_err)
     elif data == "status":
         tg_send(chat_id, status_text())
+    elif data.startswith("hist:"):
+        # history pagination
+        try:
+            _page = int(data.split(":", 1)[1])
+            send_history_page(chat_id, _page)
+        except Exception:
+            pass
+    elif data.startswith("export:"):
+        # journal export by period
+        _period = data.split(":", 1)[1]
+        _path, _count = export_journal(_period)
+        if _path and _count > 0:
+            # send as document
+            try:
+                tg_send_document(chat_id, _path,
+                    f"📤 Journal export ({_period}): {_count} trades")
+            except Exception as e:
+                tg_send(chat_id, f"❌ Export failed: {str(e)[:60]}")
+            finally:
+                try:
+                    os.unlink(_path)
+                except Exception:
+                    pass
+        else:
+            tg_send(chat_id, f"❌ No trades found for period: {_period}")
     elif data == "pause_1h":
         save_state({"paused_until": int(time.time()) + 3600,
                     "alert_on": True})
@@ -580,7 +689,13 @@ def handle_callback(data):
         else:
             reply = handle(_cmd)
             if reply:
-                tg_send(chat_id, reply)
+                if reply.startswith("HISTORY:"):
+                    _page = int(reply.split(":", 1)[1])
+                    send_history_page(chat_id, _page)
+                elif reply == "EXPORT_PICKER":
+                    send_export_picker(chat_id)
+                else:
+                    tg_send(chat_id, reply)
 
 def build_menu(section="main"):
     # v2.4: interactive categorized menu
@@ -771,7 +886,9 @@ def handle(text):
     if cmd in ("/alert_status", "/check"):
         return status_text()
     if cmd == "/history":
-        return history_text()
+        return "HISTORY:0"  # special marker, handled in poller loop with pagination
+    if cmd == "/export_journal":
+        return "EXPORT_PICKER"  # special marker, shows day/week/month/year picker
     if cmd == "/trend":
         return trend_text()
     if cmd in ("/skip_trade", "/close_trade", "/cancel_trade"):
@@ -931,6 +1048,12 @@ try:
                     _section = reply.split(":", 1)[1]
                     _kb, _txt = build_menu(_section)
                     tg_send(CHAT_ID, _txt, keyboard=_kb)
+                elif reply.startswith("HISTORY:"):
+                    # paginated history
+                    _page = int(reply.split(":", 1)[1])
+                    send_history_page(CHAT_ID, _page)
+                elif reply == "EXPORT_PICKER":
+                    send_export_picker(CHAT_ID)
                 else:
                     tg_send(CHAT_ID, reply)
                 log("xauusd-tg-cmd", f"handled:{text.split()[0]}")
