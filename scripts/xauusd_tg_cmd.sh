@@ -47,10 +47,13 @@ def tg_api(method, params=None, timeout=25):
     req = urllib.request.Request(url, data=data, headers={"User-Agent": "Mozilla/5.0"})
     return json.load(urllib.request.urlopen(req, timeout=timeout))
 
-def tg_send(chat_id, text):
+def tg_send(chat_id, text, keyboard=None):
     if DRY:
         return
-    tg_api("sendMessage", {"chat_id": chat_id, "text": text, "parse_mode": "HTML"})
+    payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+    if keyboard:
+        payload["reply_markup"] = json.dumps(keyboard, separators=(",", ":"))
+    tg_api("sendMessage", payload)
 
 def tg_send_photo(chat_id, photo_path, caption):
     # photo upload via curl (multipart); token stays in the URL, never logged.
@@ -554,11 +557,88 @@ def handle_callback(data):
         tg_send(chat_id,
                 "🔴 <b>XAUUSD alerts turned off.</b>\n"
                 "Send /alert_on to turn them on again.")
+    elif data.startswith("menu:"):
+        # interactive menu navigation (v2.4)
+        _m = data.split(":", 1)[1]
+        _kb, _txt = build_menu(_m)
+        # edit the menu message in place
+        try:
+            # get message_id from callback query - need to pass it
+            # for now, send new message (simpler, robust)
+            tg_send(chat_id, _txt, keyboard=_kb)
+        except Exception:
+            pass
+    elif data.startswith("cmd:"):
+        # execute a command from menu button
+        _cmd = data.split(":", 1)[1]
+        if _cmd == "/chart":
+            photo, cap_or_err = handle_chart()
+            if photo:
+                tg_send_photo(chat_id, photo, cap_or_err)
+            else:
+                tg_send(chat_id, cap_or_err)
+        else:
+            reply = handle(_cmd)
+            if reply:
+                tg_send(chat_id, reply)
+
+def build_menu(section="main"):
+    # v2.4: interactive categorized menu
+    if section == "alerts":
+        kb = {"inline_keyboard": [
+            [{"text": "🟢 M5 ON", "callback_data": "cmd:/alert_on"},
+             {"text": "🔴 M5 OFF", "callback_data": "cmd:/alert_off"}],
+            [{"text": "🟢 M1 ON", "callback_data": "cmd:/alert_on_m1"},
+             {"text": "🔴 M1 OFF", "callback_data": "cmd:/alert_off_m1"}],
+            [{"text": "🟢 M15 ON", "callback_data": "cmd:/alert_on_m15"},
+             {"text": "🔴 M15 OFF", "callback_data": "cmd:/alert_off_m15"}],
+            [{"text": "📊 Status", "callback_data": "cmd:/alert_status"}],
+            [{"text": "« Back", "callback_data": "menu:main"}],
+        ]}
+        return kb, "🚨 <b>Alerts</b> — on/off per timeframe"
+    elif section == "info":
+        kb = {"inline_keyboard": [
+            [{"text": "✅ Check", "callback_data": "cmd:/check"},
+             {"text": "📈 Chart", "callback_data": "cmd:/chart"}],
+            [{"text": "📊 Trend", "callback_data": "cmd:/trend"},
+             {"text": "📜 History", "callback_data": "cmd:/history"}],
+            [{"text": "« Back", "callback_data": "menu:main"}],
+        ]}
+        return kb, "📊 <b>Info</b> — status, charts, history"
+    elif section == "risk":
+        kb = {"inline_keyboard": [
+            [{"text": "💰 Balance", "callback_data": "cmd:/set_balance"},
+             {"text": "⚖️ Risk %", "callback_data": "cmd:/set_risk"}],
+            [{"text": "📐 Lot size", "callback_data": "cmd:/set_lot"},
+             {"text": "🧮 Lot calc", "callback_data": "cmd:/lot_calc"}],
+            [{"text": "« Back", "callback_data": "menu:main"}],
+        ]}
+        return kb, "⚖️ <b>Risk</b> — balance, risk %, lot size"
+    elif section == "trade":
+        kb = {"inline_keyboard": [
+            [{"text": "⏭️ Skip", "callback_data": "cmd:/skip_trade"},
+             {"text": "✅ Close", "callback_data": "cmd:/close_trade"}],
+            [{"text": "❌ Cancel", "callback_data": "cmd:/cancel_trade"},
+             {"text": "🔄 Reset", "callback_data": "cmd:/reset_trade"}],
+            [{"text": "« Back", "callback_data": "menu:main"}],
+        ]}
+        return kb, "🔧 <b>Trade</b> — manage positions"
+    else:  # main
+        kb = {"inline_keyboard": [
+            [{"text": "🚨 Alerts", "callback_data": "menu:alerts"},
+             {"text": "📊 Info", "callback_data": "menu:info"}],
+            [{"text": "⚖️ Risk", "callback_data": "menu:risk"},
+             {"text": "🔧 Trade", "callback_data": "menu:trade"}],
+        ]}
+        return kb, "🤖 <b>Menu</b> — pilih kategori:"
 
 def handle(text):
     cmd = text.strip().split()[0].split("@")[0].lower()
     if cmd == "/start":
         return HELP
+    if cmd == "/menu":
+        # v2.4: interactive categorized menu (returns special marker)
+        return "MENU:main"
     if cmd == "/set_balance":
         # /set_balance 600 usc  |  /set_balance 200  (keep currency)  |  /set_balance 50 usd
         parts = text.strip().split()
@@ -824,7 +904,13 @@ try:
             continue
         reply = handle(text)
         if reply:
-            tg_send(CHAT_ID, reply)
+            if reply.startswith("MENU:"):
+                # v2.4: interactive menu - send with keyboard
+                _section = reply.split(":", 1)[1]
+                _kb, _txt = build_menu(_section)
+                tg_send(CHAT_ID, _txt, keyboard=_kb)
+            else:
+                tg_send(CHAT_ID, reply)
             log("xauusd-tg-cmd", f"handled:{text.split()[0]}")
     set_offset(max_id)
     log("xauusd-tg-cmd", "poll-ok")
