@@ -672,8 +672,21 @@ def heartbeat_maybe(reason):
         mins = int((st["paused_until"] - now) / 60)
         extra = f"\n⏸️ Pause active (~{mins} min left) — /alert_on to resume"
     elif at:
+        # v2.4: count open journal entries for multi-position display
+        try:
+            import csv as _csv
+            jpath = os.path.expanduser("~/hooks/state/entry_journal.csv")
+            with open(jpath) as jf:
+                _n_open = sum(1 for r in _csv.DictReader(jf)
+                             if r and r.get("status") == "open"
+                             and r.get("timeframe") == TF)
+        except Exception:
+            _n_open = 1
         tp1_px = round(at["entry"] + at["tp1_d"] * (1 if at["signal"] == "BUY" else -1), 2)
-        extra = f"\n📌 Position {at['signal']} @ ~${at['entry']} still running (TP1 ${tp1_px})"
+        if _n_open > 1:
+            extra = f"\n📌 {_n_open}x positions open (latest: {at['signal']} @ ~${at['entry']})"
+        else:
+            extra = f"\n📌 Position {at['signal']} @ ~${at['entry']} still running (TP1 ${tp1_px})"
     elif st.get("runner"):
         _rn = st["runner"]
         _mult = 1 if _rn["signal"] == "BUY" else -1
@@ -938,10 +951,10 @@ def resolve_runner():
 if sig is None:
     # v2.2: setup watch — pattern forming but not confirmed yet.
     # Early "standby" alert so he can prepare before the entry signal.
+    # v2.4: no suppression for active trades (multi-position mode).
     _setup_sig, _setup_pat = detect_setup()
-    _active_chk, _ = resolve_active_trade()
     _paused = st.get("paused_until", 0) > now
-    if (_setup_sig and not _paused and not _active_chk
+    if (_setup_sig and not _paused
             and st.get("setup_p2_t") != _setup_pat.get("p2_t")):
         try:
             _neck = int(round(_setup_pat["neck"]))
@@ -1019,8 +1032,9 @@ if st.get("paused_until", 0) > now:
 # still active (no SL hit, no TP1 touch, <48h)
 active, _closed = resolve_active_trade()
 resolve_runner()  # v1.3: post-TP1 runner watch (TP2/TP3/BE alerts)
-if active:
-    heartbeat_maybe("suppressed-active-trade")
+# v2.4: multi-position — NO suppression. New signals fire even with active trades.
+# The bot tracks the LATEST signal for SL/TP notifications; the journal records all.
+# (User requested 2026-10-08: "buat agar muncul signal lagi")
 
 sl_d = int(round(1.5 * a1))
 tp1_d = int(round(1.5 * a1))   # 1R
@@ -1192,6 +1206,14 @@ lines = [f"🚨 ENTRY XAUUSD ({TF_UP}): {dir_emoji} {sig}",
          f"🎯 TP2: ${tp2_px} (${tp2_d} from entry, 1.5R)",
          f"🎯 TP3: ${tp3_px} (${tp3_d} from entry, 2R runner)",
          ""]
+# v2.4: warn if there's already an active position (multi-position mode)
+if active:
+    _at = st.get("active_trade") or {}
+    _at_sig = _at.get("signal", "?")
+    _at_entry = _at.get("entry", "?")
+    lines.append(f"⚠️ Already have {_at_sig} @ ${_at_entry} running — "
+                 f"this is a NEW signal. Total risk adds up!")
+    lines.append("")
 # trading intelligence (context only — signal logic unchanged)
 lines.extend(intel_lines)
 lines.append("")
@@ -1213,7 +1235,7 @@ if warn:
 for hl in headlines:
     lines.append(f"\U0001F4F0 {hl}")
 lines.append("")
-lines.append("Not financial advice, manage your own risk. Experimental v2.1 brutal signal. [strat v2.1]")
+lines.append("Not financial advice, manage your own risk. Experimental v2.4 multi-position signal. [strat v2.4]")
 msg = "\n".join(lines)
 
 # --- entry chart (candles + pattern + SL/TP) ---
@@ -1254,7 +1276,8 @@ except Exception as ex:
     log(HOOK_ID, f"chart-fail:{str(ex)[:80]}")
 
 st["last_bar"] = bar_iso
-# track the open trade so new signals are suppressed until SL/TP1/48h
+# v2.4 multi-position: track the LATEST signal for SL/TP notifications.
+# New signals overwrite; the journal records all. No suppression.
 st["active_trade"] = {"signal": sig, "entry": price, "sl_d": sl_d,
                       "tp1_d": tp1_d, "tp2_d": tp2_d, "tp3_d": tp3_d,
                       "bar_ts": sig_bar[0], "ts": now}
@@ -1267,7 +1290,7 @@ if os.environ.get("HATCH_HOOK_DRY_RUN") != "1":
     def _append_signal(rows):
         # strategy version for performance comparison across logic changes
         # v2.1 brutal: -dtb = double top/bottom touch, -donch = Donchian breakout
-        sv = "2.1-" + ("dtb" if pattern["kind"] in ("DOUBLE TOP", "DOUBLE BOTTOM")
+        sv = "2.4-" + ("dtb" if pattern["kind"] in ("DOUBLE TOP", "DOUBLE BOTTOM")
                        else "donch")
         row = {"alert_time_utc": bar_iso, "signal": sig, "entry_ref": price,
                "sl_d": sl_d, "tp1_d": tp1_d, "tp2_d": tp2_d, "tp3_d": tp3_d,
