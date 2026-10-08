@@ -165,12 +165,10 @@ def tg_send_photo_only(text, photo_path, silent=False, keyboard=None):
         if not tok or not cid:
             return False
         base = "https://api.telegram.org/bot" + tok
-        def esc(s):
-            return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         _args = ["-s", "-m", "25",
                  "-F", "chat_id=" + cid,
                  "-F", "photo=@" + photo_path,
-                 "-F", "caption=" + esc(text[:1024]),
+                 "-F", "caption=" + text[:1024],
                  "-F", "parse_mode=HTML"]
         if silent:
             _args += ["-F", "disable_notification=true"]
@@ -235,14 +233,14 @@ def tg_send(text, photo=None, caption=None, silent=False, keyboard=None):
         if not tok or not cid:
             return
         base = "https://api.telegram.org/bot" + tok
-        def esc(s):
-            return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         # B01 (P0): ALWAYS send text via sendMessage first (checked).
         # Photo sent separately with short caption. If photo fails,
         # text alert is not lost.
+        # NOTE: No HTML escaping - all markup (<b>, <i>) is intentional.
+        # Data interpolated is numeric/safe (prices, levels).
         _args = ["-s", "-m", "25",
                "--data-urlencode", "chat_id=" + cid,
-               "--data-urlencode", "text=" + esc(text[:4096]),
+               "--data-urlencode", "text=" + text[:4096],
                "--data-urlencode", "parse_mode=HTML"]
         if silent:
             _args += ["--data-urlencode", "disable_notification=true"]
