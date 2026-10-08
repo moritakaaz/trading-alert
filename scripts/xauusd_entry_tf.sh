@@ -994,6 +994,8 @@ if sig is None:
                 f"💰 Current: ${_cur} (${_dist} from neckline)\n"
                 f"👀 Standby — NOT an entry signal.\n"
                 f"{'Entry triggers if a candle closes above' if _setup_sig == 'BUY' else 'Entry triggers if a candle closes below'} ${_neck}.\n"
+                f"To prepare: place {'BUY STOP' if _setup_sig == 'BUY' else 'SELL STOP'} at ${_neck} "
+                f"(not {'buy' if _setup_sig == 'BUY' else 'sell'} limit).\n"
                 f"\n🕐 {_wib} WIB [setup v2.4]"
             )
             # chart of the forming pattern
