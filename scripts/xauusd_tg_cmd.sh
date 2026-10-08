@@ -1019,6 +1019,8 @@ try:
     for u in d.get("result", []):
         uid = u.get("update_id", 0)
         max_id = max(max_id, uid + 1)
+        set_offset(max_id)  # v2.5: advance IMMEDIATELY, before processing
+        # (continue statements below must not skip the offset update)
         try:
             # inline-keyboard taps arrive as callback_query
             cq = u.get("callback_query")
@@ -1069,7 +1071,6 @@ try:
                 log("xauusd-tg-cmd", f"handled:{text.split()[0]}")
         except Exception as _uex:
             log("xauusd-tg-cmd", f"update-fail:{uid}:{str(_uex)[:60]}")
-        set_offset(max_id)  # v2.5: advance per update, so a bad update is skipped
     log("xauusd-tg-cmd", "poll-ok")
 except Exception as ex:
     log("xauusd-tg-cmd", f"fail:{str(ex)[:80]}")
