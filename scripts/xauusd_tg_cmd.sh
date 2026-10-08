@@ -689,6 +689,55 @@ def handle_callback(data):
                     pass
         else:
             tg_send(chat_id, f"❌ No trades found for period: {_period}")
+    elif data.startswith("bal:cur:"):
+        # User tapped a currency -> prompt for amount
+        _cur = data.split(":", 2)[2]
+        _unit = {"idr": "IDR", "usd": "USD", "usc": "USDc"}[_cur]
+        save_state({"_pending_balance_cur": _cur})
+        tg_send(chat_id,
+                f"💵 Enter balance amount for <b>{_unit}</b>:\n"
+                f"(just type the number, e.g. <code>1500000</code>)")
+    elif data == "bal:del":
+        # Show delete options
+        st0 = load_state()
+        bals = st0.get("balances") or {}
+        _btns = []
+        for _c in ("idr", "usd", "usc"):
+            if _c in bals:
+                _u = {"idr": "IDR", "usd": "USD", "usc": "USDc"}[_c]
+                _btns.append({"text": f"🗑️ {_u} ({bals[_c]:,})",
+                              "callback_data": f"bal:del:{_c}"})
+        _kb_rows = [[b] for b in _btns]
+        _kb_rows.append([{"text": "🗑️ Delete ALL", "callback_data": "bal:del:all"}])
+        _kb_rows.append([{"text": "« Cancel", "callback_data": "bal:cancel"}])
+        tg_send(chat_id, "🗑️ <b>Delete which balance?</b>",
+                keyboard={"inline_keyboard": _kb_rows})
+    elif data.startswith("bal:del:"):
+        _target = data.split(":", 2)[2]
+        st0 = load_state()
+        bals = st0.get("balances") or {}
+        if _target == "all":
+            save_state({"balances": {},
+                       "modal": {"amount": 600, "currency": "usc"},
+                       "active_currency": "usc"})
+            tg_send(chat_id, "🗑️ <b>All balances deleted.</b> Reset to default 600 USDc.")
+        elif _target in bals:
+            _u = {"idr": "IDR", "usd": "USD", "usc": "USDc"}[_target]
+            del bals[_target]
+            # If deleted active, fall back to usc default
+            _active = st0.get("active_currency", "usc")
+            if _active == _target:
+                _active = "usc"
+                _modal = {"amount": 600, "currency": "usc"}
+            else:
+                _modal = {"amount": bals.get(_active, 600), "currency": _active}
+            save_state({"balances": bals, "active_currency": _active,
+                       "modal": _modal})
+            tg_send(chat_id, f"🗑️ <b>{_u} balance deleted.</b>")
+        else:
+            tg_send(chat_id, "❌ Nothing to delete.")
+    elif data == "bal:cancel":
+        tg_send(chat_id, "Cancelled.")
     # B09: parse TF from callback_data (e.g. "pause_1h:m1", "alert_off:m15")
     # Pause must NOT change alert_on. Each TF's state is modified independently.
     elif data == "pause_1h" or data.startswith("pause_1h:"):
@@ -785,40 +834,78 @@ def build_menu(section="main"):
 
 def handle(text):
     cmd = text.strip().split()[0].split("@")[0].lower()
+    # Pending balance amount: user tapped a currency button, now types the number
+    if not cmd.startswith("/"):
+        st0 = load_state()
+        _pending = st0.get("_pending_balance_cur")
+        if _pending:
+            _txt = text.strip().replace(",", "").replace(".", "", 1) if "." in text.strip() else text.strip().replace(",", "")
+            # Allow decimals
+            try:
+                _clean = text.strip().replace(",", "")
+                amount = float(_clean)
+            except ValueError:
+                return "❌ Please enter a valid number, or /set_balance to cancel."
+            if amount <= 0:
+                return "❌ Amount must be greater than 0."
+            bals = st0.get("balances") or {}
+            bals[_pending] = int(amount) if amount == int(amount) else round(amount, 2)
+            _unit = {"idr": "IDR", "usd": "USD", "usc": "USDc"}[_pending]
+            save_state({"balances": bals, "active_currency": _pending,
+                       "modal": {"amount": bals[_pending], "currency": _pending},
+                       "_pending_balance_cur": None})
+            return (f"✅ <b>Balance set: {bals[_pending]:,} {_unit}</b>\n"
+                    f"This is now the active currency for risk calculations.")
     if cmd == "/start":
         return HELP
     if cmd == "/menu":
         # v2.4: interactive categorized menu (returns special marker)
         return "MENU:main"
     if cmd == "/set_balance":
-        # /set_balance 600 usc  |  /set_balance 200  (keep currency)  |  /set_balance 50 usd
+        # Interactive: /set_balance -> currency buttons -> enter amount
+        # Also supports: /set_balance 600 usc (legacy)
         parts = text.strip().split()
-        if len(parts) < 2:
+        # Legacy direct: /set_balance <amount> [currency]
+        if len(parts) >= 2 and parts[1].replace(".","",1).replace("-","",1).isdigit():
+            try:
+                amount = float(parts[1])
+            except ValueError:
+                return "❌ Amount must be a number."
+            if amount <= 0:
+                return "❌ Amount must be greater than 0."
             st0 = load_state()
-            m0 = st0.get("modal") or {"amount": 600, "currency": "usc"}
-            u0 = "USC" if (m0.get("currency") or "usc") == "usc" else "USD"
-            return (f"💰 Current balance: <b>{m0.get('amount')} {u0}</b>\n"
-                    f"Usage: /set_balance &lt;amount&gt; [usd|usc]\n"
-                    f"Example: /set_balance 600 usc")
-        try:
-            amount = float(parts[1])
-        except ValueError:
-            return "❌ Amount must be a number. Example: /set_balance 600 usc"
-        if amount <= 0:
-            return "❌ Amount must be greater than 0."
+            bals = st0.get("balances") or {}
+            active = st0.get("active_currency", "usc")
+            if len(parts) > 2:
+                cur = parts[2].lower().replace("usdc","usc")
+                if cur not in ("idr", "usd", "usc"):
+                    return "❌ Currency must be: idr, usd, or usc."
+                active = cur
+            bals[active] = int(amount) if amount == int(amount) else round(amount, 2)
+            save_state({"balances": bals, "active_currency": active,
+                       "modal": {"amount": bals[active], "currency": active}})
+            unit = {"idr": "IDR", "usd": "USD", "usc": "USC"}[active]
+            return (f"✅ <b>Balance set: {bals[active]:,} {unit}</b>\n"
+                    f"Risk % in alerts now uses this figure.")
+        # Interactive mode: show currency picker
         st0 = load_state()
-        modal = st0.get("modal") or {"amount": 600, "currency": "usc"}
-        if len(parts) > 2:
-            cur = parts[2].lower()
-            if cur not in ("usd", "usc"):
-                return "❌ Currency must be: usd or usc."
-            modal["currency"] = cur
-        modal["amount"] = int(amount) if amount == int(amount) else round(amount, 2)
-        save_state({"modal": modal})
-        unit = "USC" if modal["currency"] == "usc" else "USD"
-        return (f"✅ <b>Balance set: {modal['amount']} {unit}</b>\n"
-                f"Risk % in alerts & notifications now uses this figure.\n"
-                f"Update again via /set_balance after each deposit/withdrawal.")
+        bals = st0.get("balances") or {}
+        active = st0.get("active_currency", "usc")
+        lines = ["💰 <b>Balance Setup</b>", ""]
+        for c in ("idr", "usd", "usc"):
+            unit = {"idr": "IDR", "usd": "USD", "usc": "USC"}[c]
+            amt = bals.get(c, "—")
+            mark = " ✅" if c == active else ""
+            lines.append(f"• {unit}: {amt:,}{mark}" if isinstance(amt,(int,float)) else f"• {unit}: —{mark}")
+        lines.append("")
+        lines.append("Tap a currency to set its balance, or 🗑️ to delete.")
+        kb = {"inline_keyboard": [
+            [{"text": "💵 IDR", "callback_data": "bal:cur:idr"},
+             {"text": "💵 USD", "callback_data": "bal:cur:usd"},
+             {"text": "💵 USDc", "callback_data": "bal:cur:usc"}],
+            [{"text": "🗑️ Delete balance", "callback_data": "bal:del"}],
+        ]}
+        return ("\n".join(lines), kb)
     if cmd == "/set_risk":
         # /set_risk 2  -> max 2% risk per trade
         parts = text.strip().split()

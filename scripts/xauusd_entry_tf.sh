@@ -1192,11 +1192,22 @@ tp2_d = int(round(2.25 * a1))  # 1.5R
 tp3_d = int(round(3.0 * a1))   # 2R runner (research-validated full TP)
 price = int(round(sig_bar[4]))  # entry reference = signal bar close, whole numbers only (TradingView-friendly)
 # --- modal & risk (set via /set_balance; default 600 USC = HFM Cent account) ---
-# $1 gold move at 0.01 lot = 1 USC (cent) or $1 (USD) -> sl_d IS the risk
-# in account units at min lot; only the label differs by currency.
+# $1 gold move at 0.01 lot = 1 USC (cent) = $0.01 (USD) = ~Rp160 (IDR)
+# risk_usc is the base unit; converted to active currency for display.
 _modal = st.get("modal") or {"amount": 600, "currency": "usc"}
 m_amount = float(_modal.get("amount") or 600)
-m_unit = "USC" if (_modal.get("currency") or "usc") == "usc" else "USD"
+_m_cur = (_modal.get("currency") or "usc").lower()
+# USD/IDR rate (configurable via state, default 16000)
+_usd_idr = float(st.get("usd_idr_rate") or 16000)
+if _m_cur == "idr":
+    m_unit = "IDR"
+    _risk_conv = _usd_idr / 100.0  # USC -> IDR
+elif _m_cur == "usd":
+    m_unit = "USD"
+    _risk_conv = 0.01  # USC -> USD
+else:
+    m_unit = "USC"
+    _risk_conv = 1.0  # USC as-is
 # v2.4: user-configurable risk % limit and lot size (via /set_risk, /set_lot)
 # Stored in M5 state (global); M1/M15 read from there.
 def _global_setting(key, default):
@@ -1214,12 +1225,17 @@ _lot_size = float(_global_setting("lot_size", 0.01))
 # risk scales with lot: at 0.01 lot, $1 = 1 unit; at 0.02 lot, $1 = 2 units, etc.
 _lot_mult = _lot_size / 0.01
 risk_usc = sl_d * _lot_mult
-risk_pct = (risk_usc / m_amount * 100) if m_amount > 0 else 0
+# Convert to active currency for display and % calculation
+risk_display = risk_usc * _risk_conv
+risk_pct = (risk_display / m_amount * 100) if m_amount > 0 else 0
 # lot size for ~risk_limit% risk, rounded DOWN to 0.01 step, floored at min lot
 import math as _math
-_lot_raw = (m_amount * (_risk_limit / 100) / sl_d) * 0.01 if sl_d > 0 else 0.01
+# Convert balance to USC for lot calculation, then back
+_m_usc = m_amount / _risk_conv if _risk_conv > 0 else m_amount
+_lot_raw = (_m_usc * (_risk_limit / 100) / sl_d) * 0.01 if sl_d > 0 else 0.01
 lot_suggest = max(0.01, _math.floor(_lot_raw * 100) / 100)
-lot_risk_pct = (sl_d * (lot_suggest / 0.01) / m_amount * 100) if m_amount > 0 else 0
+_lot_risk_usc = sl_d * (lot_suggest / 0.01)
+lot_risk_pct = (_lot_risk_usc * _risk_conv / m_amount * 100) if m_amount > 0 else 0
 
 # --- economic calendar (FRED, cached daily) ---
 cal_lines = []
@@ -1391,7 +1407,7 @@ if active:
 # trading intelligence (context only — signal logic unchanged)
 lines.extend(intel_lines)
 lines.append("")
-lines.extend([f"⚖️ Risk @{_lot_size} lot: ~{risk_usc:.0f} {m_unit} ({risk_pct:.1f}% of balance)",
+lines.extend([f"⚖️ Risk @{_lot_size} lot: ~{risk_display:,.0f} {m_unit} ({risk_pct:.1f}% of balance)",
          f"💡 Lot for ~{_risk_limit}% risk: {lot_suggest:.2f} (risk {lot_risk_pct:.1f}%)"])
 # hard warning (not a block) when risk exceeds user's limit
 if risk_pct > _risk_limit:
@@ -1496,7 +1512,7 @@ _cap_lines = [
     f"🎯 TP2: ${tp2_px} (${tp2_d}, 1.5R)",
     f"🎯 TP3: ${tp3_px} (${tp3_d}, 2R)",
     "",
-    f"⚖️ Risk: ~{risk_usc:.0f} {m_unit} ({risk_pct:.1f}%)",
+    f"⚖️ Risk: ~{risk_display:,.0f} {m_unit} ({risk_pct:.1f}%)",
 ]
 if risk_pct > _risk_limit:
     _cap_lines.append(f"⚠️ RISK {risk_pct:.1f}% (>{_risk_limit}%) — consider skipping")
