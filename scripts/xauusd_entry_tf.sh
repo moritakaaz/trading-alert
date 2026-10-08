@@ -1047,11 +1047,16 @@ price = int(round(sig_bar[4]))  # entry reference = signal bar close, whole numb
 _modal = st.get("modal") or {"amount": 600, "currency": "usc"}
 m_amount = float(_modal.get("amount") or 600)
 m_unit = "USC" if (_modal.get("currency") or "usc") == "usc" else "USD"
-risk_usc = sl_d
-risk_pct = (sl_d / m_amount * 100) if m_amount > 0 else 0
-# lot size for ~2% risk, rounded DOWN to 0.01 step, floored at min lot
+# v2.4: user-configurable risk % limit and lot size (via /set_risk, /set_lot)
+_risk_limit = float(st.get("risk_pct_limit") or 2.0)
+_lot_size = float(st.get("lot_size") or 0.01)
+# risk scales with lot: at 0.01 lot, $1 = 1 unit; at 0.02 lot, $1 = 2 units, etc.
+_lot_mult = _lot_size / 0.01
+risk_usc = sl_d * _lot_mult
+risk_pct = (risk_usc / m_amount * 100) if m_amount > 0 else 0
+# lot size for ~risk_limit% risk, rounded DOWN to 0.01 step, floored at min lot
 import math as _math
-_lot_raw = (m_amount * 0.02 / sl_d) * 0.01 if sl_d > 0 else 0.01
+_lot_raw = (m_amount * (_risk_limit / 100) / sl_d) * 0.01 if sl_d > 0 else 0.01
 lot_suggest = max(0.01, _math.floor(_lot_raw * 100) / 100)
 lot_risk_pct = (sl_d * (lot_suggest / 0.01) / m_amount * 100) if m_amount > 0 else 0
 
@@ -1217,11 +1222,11 @@ if active:
 # trading intelligence (context only — signal logic unchanged)
 lines.extend(intel_lines)
 lines.append("")
-lines.extend([f"⚖️ Risk @0.01 lot: ~{risk_usc} {m_unit} ({risk_pct:.1f}% of balance)",
-         f"💡 Lot for ~2% risk: {lot_suggest:.2f} (risk {lot_risk_pct:.1f}%)"])
-# hard warning (not a block) when risk exceeds 2% of modal
-if risk_pct > 2:
-    lines.append(f"⚠️ RISK {risk_pct:.1f}% OF BALANCE (>2%) — consider skipping this signal")
+lines.extend([f"⚖️ Risk @{_lot_size} lot: ~{risk_usc:.0f} {m_unit} ({risk_pct:.1f}% of balance)",
+         f"💡 Lot for ~{_risk_limit}% risk: {lot_suggest:.2f} (risk {lot_risk_pct:.1f}%)"])
+# hard warning (not a block) when risk exceeds user's limit
+if risk_pct > _risk_limit:
+    lines.append(f"⚠️ RISK {risk_pct:.1f}% OF BALANCE (>{_risk_limit}%) — consider skipping this signal")
 lines.extend([
          f"Levels from ref price ({src}) — may differ slightly vs your broker, adjust",
          ""])

@@ -282,6 +282,8 @@ HELP = ("🤖 <b>XAUUSD alert bot commands</b>\n"
         "/trend — current H1 & M15 trend\n"
         "/history — last 10 signals + results\n"
         "/set_balance — set balance (e.g. /set_balance 600 usc)\n"
+        "/set_risk — set max risk % per trade (e.g. /set_risk 2)\n"
+        "/set_lot — set lot size for risk calc (e.g. /set_lot 0.01)\n"
         "/skip_trade — skip signal (no entry)\n"
         "/close_trade — close manually (sl|tp1|tp2|tp3|be|manual)\n"
         "/cancel_trade — cancel signal (invalid)\n"
@@ -585,6 +587,71 @@ def handle(text):
         return (f"✅ <b>Balance set: {modal['amount']} {unit}</b>\n"
                 f"Risk % in alerts & notifications now uses this figure.\n"
                 f"Update again via /set_balance after each deposit/withdrawal.")
+    if cmd == "/set_risk":
+        # /set_risk 2  -> max 2% risk per trade
+        parts = text.strip().split()
+        if len(parts) < 2:
+            st0 = load_state()
+            _rp = st0.get("risk_pct_limit", 2.0)
+            return (f"⚖️ Current max risk: <b>{_rp}%</b> per trade\n"
+                    f"Usage: /set_risk &lt;percent&gt;\n"
+                    f"Example: /set_risk 2")
+        try:
+            pct = float(parts[1])
+        except ValueError:
+            return "❌ Percent must be a number. Example: /set_risk 2"
+        if pct <= 0 or pct > 100:
+            return "❌ Percent must be between 0 and 100."
+        save_state({"risk_pct_limit": pct})
+        # also set for M1/M15 states (global setting)
+        for _tf in ("m1", "m15"):
+            try:
+                _p = os.path.expanduser(f"~/hooks/state/xauusd_entry_{_tf}.json")
+                _s = {}
+                if os.path.isfile(_p):
+                    with open(_p) as _f:
+                        _s = json.load(_f)
+                _s["risk_pct_limit"] = pct
+                _tmp = _p + ".tmp"
+                with open(_tmp, "w") as _f:
+                    json.dump(_s, _f)
+                os.replace(_tmp, _p)
+            except Exception:
+                pass
+        return (f"✅ <b>Max risk set: {pct}%</b> per trade\n"
+                f"Alerts will warn when a signal exceeds this.")
+    if cmd == "/set_lot":
+        # /set_lot 0.01 -> lot size for risk calculations
+        parts = text.strip().split()
+        if len(parts) < 2:
+            st0 = load_state()
+            _ls = st0.get("lot_size", 0.01)
+            return (f"📐 Current lot size: <b>{_ls}</b>\n"
+                    f"Usage: /set_lot &lt;size&gt;\n"
+                    f"Example: /set_lot 0.01")
+        try:
+            ls = float(parts[1])
+        except ValueError:
+            return "❌ Lot size must be a number. Example: /set_lot 0.01"
+        if ls < 0.01 or ls > 100:
+            return "❌ Lot size must be between 0.01 and 100."
+        save_state({"lot_size": ls})
+        for _tf in ("m1", "m15"):
+            try:
+                _p = os.path.expanduser(f"~/hooks/state/xauusd_entry_{_tf}.json")
+                _s = {}
+                if os.path.isfile(_p):
+                    with open(_p) as _f:
+                        _s = json.load(_f)
+                _s["lot_size"] = ls
+                _tmp = _p + ".tmp"
+                with open(_tmp, "w") as _f:
+                    json.dump(_s, _f)
+                os.replace(_tmp, _p)
+            except Exception:
+                pass
+        return (f"✅ <b>Lot size set: {ls}</b>\n"
+                f"Risk calculations in alerts now use this.")
     if cmd == "/alert_on":
         save_state({"alert_on": True, "paused_until": 0})
         return ("🟢 <b>XAUUSD M5 alerts turned on.</b>\n"
