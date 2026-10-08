@@ -287,8 +287,8 @@ def status_text():
             f"🚨 Last signal: {esc(last_sig)}{pos_line}")
 
 HELP = ("🤖 <b>XAUUSD alert bot commands</b>\n"
-        "/alert_on — turn M5 alerts on\n"
-        "/alert_off — turn M5 alerts off\n"
+        "/alert_on_m5 — turn M5 alerts on\n"
+        "/alert_off_m5 — turn M5 alerts off\n"
         "/alert_on_m1 — turn M1 alerts on\n"
         "/alert_off_m1 — turn M1 alerts off\n"
         "/alert_on_m15 — turn M15 alerts on\n"
@@ -660,12 +660,12 @@ def handle_callback(data):
         tg_send(chat_id,
                 "⏸️ <b>Alerts paused for 1 hour.</b>\n"
                 "Entry signals paused, heartbeat still running.\n"
-                "Send /alert_on to resume sooner.")
+                "Send /alert_on_m5 to resume sooner.")
     elif data == "alert_off":
         save_state({"alert_on": False, "paused_until": 0})
         tg_send(chat_id,
                 "🔴 <b>XAUUSD alerts turned off.</b>\n"
-                "Send /alert_on to turn them on again.")
+                "Send /alert_on_m5 to turn them on again.")
     elif data.startswith("menu:"):
         # interactive menu navigation (v2.4)
         _m = data.split(":", 1)[1]
@@ -701,8 +701,8 @@ def build_menu(section="main"):
     # v2.4: interactive categorized menu
     if section == "alerts":
         kb = {"inline_keyboard": [
-            [{"text": "🟢 M5 ON", "callback_data": "cmd:/alert_on"},
-             {"text": "🔴 M5 OFF", "callback_data": "cmd:/alert_off"}],
+            [{"text": "🟢 M5 ON", "callback_data": "cmd:/alert_on_m5"},
+             {"text": "🔴 M5 OFF", "callback_data": "cmd:/alert_off_m5"}],
             [{"text": "🟢 M1 ON", "callback_data": "cmd:/alert_on_m1"},
              {"text": "🔴 M1 OFF", "callback_data": "cmd:/alert_off_m1"}],
             [{"text": "🟢 M15 ON", "callback_data": "cmd:/alert_on_m15"},
@@ -867,10 +867,10 @@ def handle(text):
         save_state({"alert_on": True, "paused_until": 0})
         return ("🟢 <b>XAUUSD M5 alerts turned on.</b>\n"
                 "BUY/SELL signals + 5-min heartbeat active.")
-    if cmd == "/alert_off":
+    if cmd in ("/alert_off", "/alert_off_m5"):
         save_state({"alert_on": False})
         return ("🔴 <b>XAUUSD M5 alerts turned off.</b>\n"
-                "Send /alert_on to turn them on again.")
+                "Send /alert_on_m5 to turn them on again.")
     if cmd in ("/alert_on_m1", "/alert_off_m1",
                "/alert_on_m15", "/alert_off_m15"):
         # multi-TF switches (v2.1): independent on/off per timeframe

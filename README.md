@@ -109,7 +109,7 @@ cp .env.example .env
 ## Telegram Commands
 
 **Alerts (per timeframe, independent):**
-`/alert_on` `/alert_off` — M5 (default)
+`/alert_on_m5 — M5 (default)
 `/alert_on_m1` `/alert_off_m1` — M1
 `/alert_on_m15` `/alert_off_m15` — M15
 `/alert_status` — status of all three
