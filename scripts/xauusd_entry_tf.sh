@@ -405,6 +405,12 @@ def kraken(pair, interval, n=720):
             for b in d["result"][key]]
 
 src = "Twelve Data XAU/USD"
+# Quota saver: if alerts OFF and no active trade/runner to monitor, skip API calls
+_at_chk = _s0.get("active_trade")
+_runner_chk = _s0.get("runner")
+if not _alert_on and not _at_chk and not _runner_chk:
+    log(HOOK_ID, "alert-off-no-position-skip-api")
+    out("silent", "alert-off")
 try:
     tfbars = td_ohlc(TF_INTERVAL, TF_BARS)  # pattern history for this TF
     h1 = td_ohlc("1h", 80)
