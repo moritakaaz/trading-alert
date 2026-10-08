@@ -36,10 +36,11 @@ Three independent alert systems: **M1** (1-min poll), **M5** (5-min poll),
 | Max drawdown | ~14R |
 | Frequency | 0.93 trades/day |
 
-Honest notes: the no-filter + dual-trigger + touch-entry combo was NOT
-backtested — only the close-confirmed pattern version above. Q3 2026 was a
-losing quarter. Excludes spread/commission/slippage — live results **will be
-worse**. These numbers are not a promise. The journal judges.
+Honest notes: the no-filter + dual-trigger combo was NOT backtested — only the
+close-confirmed pattern version above (touch entry was tried and reverted:
+a wick that closes back means the level held). Q3 2026 was a losing quarter.
+Excludes spread/commission/slippage — live results **will be worse**. These
+numbers are not a promise. The journal judges.
 
 Superseded: v1.2 (Donchian + H4 + EMA-H1 filter, PF 1.38) and v2.0
 (double top/bottom with M15+H1 EMA agreement filter, PF 1.22).
@@ -84,7 +85,11 @@ cp .env.example .env
    Optional: [Finnhub](https://finnhub.io) (news), [FRED](https://fred.stlouisfed.org) (calendar).
 3. Adjust the state/log paths in the scripts to your environment
    (defaults point to `~/hooks/state/` and `~/hooks/logs/`).
-4. Run `scripts/xauusd_entry_m5.sh` every 5 minutes via cron/systemd.
+4. Run the alert pollers via cron/systemd:
+   - `scripts/xauusd_entry_m1.sh` every 1 minute (M1)
+   - `scripts/xauusd_entry_m5.sh` every 5 minutes (M5)
+   - `scripts/xauusd_entry_m15.sh` every 5 minutes (M15)
+   Each is independent — enable only the timeframes you want.
 
 > Note: the scripts were built for a specific VM setup with a custom credential
 > pattern (`dynamic_credentials` surrogate). On other environments, replace the
@@ -92,8 +97,15 @@ cp .env.example .env
 
 ## Telegram Commands
 
-`/alert_on` `/alert_off` `/alert_status` `/check` `/chart` `/trend` `/history`
-`/set_balance` `/skip_trade` `/close_trade` `/cancel_trade` `/reset_trade`
+**Alerts (per timeframe, independent):**
+`/alert_on` `/alert_off` — M5 (default)
+`/alert_on_m1` `/alert_off_m1` — M1
+`/alert_on_m15` `/alert_off_m15` — M15
+`/alert_status` — status of all three
+
+**Info & management:**
+`/check` `/chart` `/trend` `/history` `/set_balance`
+`/skip_trade` `/close_trade` `/cancel_trade` `/reset_trade`
 
 ## License
 
