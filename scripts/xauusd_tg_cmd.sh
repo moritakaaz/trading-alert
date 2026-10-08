@@ -55,6 +55,21 @@ def tg_send(chat_id, text, keyboard=None):
         payload["reply_markup"] = json.dumps(keyboard, separators=(",", ":"))
     tg_api("sendMessage", payload)
 
+def _curl_noleak(url, args, timeout=45):
+    """B30 (P1): run curl without exposing the bot token in process argv."""
+    import tempfile
+    _cfg = tempfile.NamedTemporaryFile(mode="w", suffix=".curlcfg", delete=False)
+    try:
+        _cfg.write('url = "%s"\n' % url.replace('"', "%22"))
+        _cfg.close()
+        return subprocess.run(["curl", "-K", _cfg.name] + args,
+                              capture_output=True, timeout=timeout)
+    finally:
+        try:
+            os.unlink(_cfg.name)
+        except Exception:
+            pass
+
 def tg_send_photo(chat_id, photo_path, caption):
     # photo upload via curl (multipart); token stays in the URL, never logged.
     # NOTE: caption must already be valid HTML (with <b> etc.) — do NOT
@@ -64,13 +79,13 @@ def tg_send_photo(chat_id, photo_path, caption):
     tok, _ = tg_creds()
     if not os.path.isfile(photo_path):
         return
-    subprocess.run(["curl", "-s", "-m", "40",
+    _curl_noleak(f"https://api.telegram.org/bot{tok}/sendPhoto",
+                   ["-s", "-m", "40",
                     "-F", "chat_id=" + chat_id,
                     "-F", "photo=@" + photo_path,
                     "-F", "caption=" + caption,
-                    "-F", "parse_mode=HTML",
-                    f"https://api.telegram.org/bot{tok}/sendPhoto"],
-                   capture_output=True, timeout=45)
+                    "-F", "parse_mode=HTML"],
+                   timeout=45)
 
 def tg_send_document(chat_id, doc_path, caption):
     # document upload via curl (multipart)
@@ -79,12 +94,12 @@ def tg_send_document(chat_id, doc_path, caption):
     tok, _ = tg_creds()
     if not os.path.isfile(doc_path):
         return
-    subprocess.run(["curl", "-s", "-m", "60",
+    _curl_noleak(f"https://api.telegram.org/bot{tok}/sendDocument",
+                   ["-s", "-m", "60",
                     "-F", "chat_id=" + chat_id,
                     "-F", "document=@" + doc_path,
-                    "-F", "caption=" + caption,
-                    f"https://api.telegram.org/bot{tok}/sendDocument"],
-                   capture_output=True, timeout=65)
+                    "-F", "caption=" + caption],
+                   timeout=65)
 
 def esc(s):
     return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -357,7 +372,12 @@ def history_text(page=0):
                 pass
             res = f"🎯 {oc}{rtag}"
         elif oc == "expired":
-            res = "⌛ expired (0R)"
+            # B14 (P1): show stored r_multiple, not hardcoded 0R
+            try:
+                rtag = f" ({float(rm):+g}R)" if rm else ""
+            except ValueError:
+                rtag = ""
+            res = f"⌛ expired{rtag}"
         elif oc == "skipped":
             res = "⏭️ skipped"
         elif oc == "cancelled":
@@ -444,8 +464,7 @@ def td_ohlc(interval, n):
     return [(v["t"], v["o"], v["h"], v["l"], v["c"]) for v in d["values"]]
 
 def trend_text():
-    # v2.0 trend: H1 + M15 EMA20/50 (the signal filter).
-    # Both agree -> only that direction passes; disagree -> both allowed.
+    # Trend context (info only since v2.1 — no filter).
     try:
         h1 = td_ohlc("1h", 80)
         m5 = td_ohlc("5min", 300)
@@ -486,16 +505,13 @@ def trend_text():
     now_px = h1c[-1]
     e1 = "🟢" if h1_trend == "BULLISH" else "🔴"
     em = "🟢" if m15_trend == "BULLISH" else "🔴"
-    if h1_trend == m15_trend:
-        fmsg = f"only <b>{'BUY' if h1_trend == 'BULLISH' else 'SELL'}</b> passes"
-    else:
-        fmsg = "both directions allowed"
+    # B07 (P1): trend filter was REMOVED in v2.1 — show as info only
     return (f"📊 <b>Current XAUUSD trend</b>\n\n"
             f"{e1} <b>H1: {h1_trend}</b> (EMA20/50)\n"
             f"{em} <b>M15: {m15_trend}</b> (EMA20/50)\n"
-            f"   → signal filter: {fmsg}\n\n"
+            f"   → info only, does not filter signals\n\n"
             f"💰 Price: <b>${now_px:,.2f}</b>\n"
-            f"[strat v2.0]")
+            f"[strat v2.5]")
 
 def last_signal():
     """Last journaled signal (the durable source of truth for /chart),
@@ -832,22 +848,16 @@ def handle(text):
         bal = float(modal.get("amount") or 600)
         unit = "USC" if (modal.get("currency") or "usc") == "usc" else "USD"
         risk_lim = float(st0.get("risk_pct_limit") or 2.0)
-        # get current ATR from M5 state or fetch
+        # B26 (P1): get live H1 ATR from engine state (saved each poll)
         try:
-            import sys as _sys
-            _sys.path.insert(0, os.path.expanduser("~/workspace/skills/twelve-data/bin"))
-            # quick ATR estimate: use last alert's ATR or default
-            atr = 12.0  # fallback
-            # try reading from M5 hook state last known
             _m5s = {}
             _mp = os.path.expanduser("~/hooks/state/xauusd_entry_m5.json")
             if os.path.isfile(_mp):
                 with open(_mp) as _f:
                     _m5s = json.load(_f)
-            # ATR not stored; use a reasonable estimate from recent alerts
-            # For now, calculate with SL=1.5*ATR, ATR~12
+            atr = float(_m5s.get("last_atr_h1") or 12.0)
         except Exception:
-            atr = 12.0
+            atr = 12.0  # fallback only if state unreadable
         sl_d = 1.5 * atr
         max_risk_usc = bal * (risk_lim / 100)
         # lot for exact risk%: L = max_risk / (SL_d * 100)
@@ -942,7 +952,7 @@ def handle(text):
                     "tp1": ("closed", "TP1", "1"),
                     "tp2": ("closed", "TP2", "1.5"),
                     "tp3": ("closed", "TP3", "2"),
-                    "be": ("closed", "TP1+BE", "0"),
+                    "be": ("closed", "TP1+BE", "1"),  # B13 (P1): full-position model
                     "manual": ("closed", "manual", "0")}
             if o not in omap:
                 return ("❌ Outcome must be: sl | tp1 | tp2 | tp3 | be | manual\n"
@@ -1032,61 +1042,92 @@ try:
     if not d.get("ok"):
         raise RuntimeError(str(d)[:100])
     max_id = offset
+    # B29 (P1): per-update retry counter (max 3). Offset advances only after
+    # successful processing or 3 failed attempts.
+    _retry_file = os.path.expanduser("~/hooks/state/tg_retry.json")
+    def _get_retries():
+        try:
+            with open(_retry_file) as _rf:
+                return json.load(_rf)
+        except Exception:
+            return {}
+    def _save_retries(_d):
+        try:
+            with open(_retry_file, "w") as _rf:
+                json.dump(_d, _rf)
+        except Exception:
+            pass
+    _retries = _get_retries()
     for u in d.get("result", []):
         uid = u.get("update_id", 0)
         max_id = max(max_id, uid + 1)
-        set_offset(max_id)  # v2.5: advance IMMEDIATELY, before processing
-        # (continue statements below must not skip the offset update)
         try:
-            # inline-keyboard taps arrive as callback_query
-            cq = u.get("callback_query")
-            if cq:
-                cq_chat = str((cq.get("message") or {}).get("chat", {}).get("id"))
-                if cq_chat == CHAT_ID:
-                    # FIX #7 (2026-10-05): DRY-guard the callback answer —
-                    # dry runs must not send real Telegram API calls
-                    if os.environ.get("HATCH_HOOK_DRY_RUN") != "1":
-                        try:
-                            tg_api("answerCallbackQuery",
-                                   {"callback_query_id": cq.get("id")})
-                        except Exception:
-                            pass
-                    handle_callback(cq.get("data", ""))
-                    log("xauusd-tg-cmd", f"handled-callback:{cq.get('data', '')}")
-                continue
-            m = u.get("message") or {}
-            if str(m.get("chat", {}).get("id")) != CHAT_ID:
-                continue
-            text = (m.get("text") or "").strip()
-            if not text.startswith("/"):
-                continue
-            cmd = text.split()[0].split("@")[0].lower()
-            if cmd == "/chart":
-                photo, cap_or_err = handle_chart()
-                if photo:
-                    tg_send_photo(CHAT_ID, photo, cap_or_err)
-                else:
-                    tg_send(CHAT_ID, cap_or_err)
-                log("xauusd-tg-cmd", "handled:/chart")
-                continue
-            reply = handle(text)
-            if reply:
-                if reply.startswith("MENU:"):
-                    # v2.4: interactive menu - send with keyboard
-                    _section = reply.split(":", 1)[1]
-                    _kb, _txt = build_menu(_section)
-                    tg_send(CHAT_ID, _txt, keyboard=_kb)
-                elif reply.startswith("HISTORY:"):
-                    # paginated history
-                    _page = int(reply.split(":", 1)[1])
-                    send_history_page(CHAT_ID, _page)
-                elif reply == "EXPORT_PICKER":
-                    send_export_picker(CHAT_ID)
-                else:
-                    tg_send(CHAT_ID, reply)
-                log("xauusd-tg-cmd", f"handled:{text.split()[0]}")
+            try:
+                # inline-keyboard taps arrive as callback_query
+                cq = u.get("callback_query")
+                if cq:
+                    cq_chat = str((cq.get("message") or {}).get("chat", {}).get("id"))
+                    if cq_chat == CHAT_ID:
+                        # FIX #7 (2026-10-05): DRY-guard the callback answer —
+                        # dry runs must not send real Telegram API calls
+                        if os.environ.get("HATCH_HOOK_DRY_RUN") != "1":
+                            try:
+                                tg_api("answerCallbackQuery",
+                                       {"callback_query_id": cq.get("id")})
+                            except Exception:
+                                pass
+                        handle_callback(cq.get("data", ""))
+                        log("xauusd-tg-cmd", f"handled-callback:{cq.get('data', '')}")
+                    continue
+                m = u.get("message") or {}
+                if str(m.get("chat", {}).get("id")) != CHAT_ID:
+                    continue
+                text = (m.get("text") or "").strip()
+                if not text.startswith("/"):
+                    continue
+                cmd = text.split()[0].split("@")[0].lower()
+                if cmd == "/chart":
+                    photo, cap_or_err = handle_chart()
+                    if photo:
+                        tg_send_photo(CHAT_ID, photo, cap_or_err)
+                    else:
+                        tg_send(CHAT_ID, cap_or_err)
+                    log("xauusd-tg-cmd", "handled:/chart")
+                    continue
+                reply = handle(text)
+                if reply:
+                    if reply.startswith("MENU:"):
+                        # v2.4: interactive menu - send with keyboard
+                        _section = reply.split(":", 1)[1]
+                        _kb, _txt = build_menu(_section)
+                        tg_send(CHAT_ID, _txt, keyboard=_kb)
+                    elif reply.startswith("HISTORY:"):
+                        # paginated history
+                        _page = int(reply.split(":", 1)[1])
+                        send_history_page(CHAT_ID, _page)
+                    elif reply == "EXPORT_PICKER":
+                        send_export_picker(CHAT_ID)
+                    else:
+                        tg_send(CHAT_ID, reply)
+                    log("xauusd-tg-cmd", f"handled:{text.split()[0]}")
+            finally:
+                # success path (inner try completed without exception,
+                # even via 'continue'): clear retry count, advance offset
+                _retries.pop(str(uid), None)
+                _save_retries(_retries)
+                set_offset(max_id)
         except Exception as _uex:
-            log("xauusd-tg-cmd", f"update-fail:{uid}:{str(_uex)[:60]}")
+            _cnt = _retries.get(str(uid), 0) + 1
+            if _cnt >= 3:
+                log("xauusd-tg-cmd", f"update-gave-up:{uid} after 3 tries: {str(_uex)[:60]}")
+                _retries.pop(str(uid), None)
+                _save_retries(_retries)
+                set_offset(max_id)  # skip it permanently
+            else:
+                _retries[str(uid)] = _cnt
+                _save_retries(_retries)
+                log("xauusd-tg-cmd", f"update-fail:{uid}:{str(_uex)[:60]} (try {_cnt}/3)")
+                break  # retry next poll; keep order
     log("xauusd-tg-cmd", "poll-ok")
 except Exception as ex:
     log("xauusd-tg-cmd", f"fail:{str(ex)[:80]}")

@@ -52,13 +52,24 @@ def tg_send(text):
         def esc(s):
             return (s or "").replace("&", "&amp;").replace("<", "&lt;") \
                             .replace(">", "&gt;")
-        subprocess.run(
-            ["curl", "-s", "-m", "25",
-             "--data-urlencode", "chat_id=" + cid,
-             "--data-urlencode", "text=" + esc(text),
-             "--data-urlencode", "parse_mode=HTML",
-             base + "/sendMessage"],
-            capture_output=True, timeout=30)
+        # B30 (P1): token via -K config file, not in argv
+        import tempfile
+        _cfg = tempfile.NamedTemporaryFile(mode="w", suffix=".curlcfg",
+                                           delete=False)
+        try:
+            _cfg.write('url = "%s"\n' % (base + "/sendMessage").replace('"', "%22"))
+            _cfg.close()
+            subprocess.run(
+                ["curl", "-K", _cfg.name, "-s", "-m", "25",
+                 "--data-urlencode", "chat_id=" + cid,
+                 "--data-urlencode", "text=" + esc(text),
+                 "--data-urlencode", "parse_mode=HTML"],
+                capture_output=True, timeout=30)
+        finally:
+            try:
+                os.unlink(_cfg.name)
+            except Exception:
+                pass
         log("tg-sent")
     except Exception as ex:
         log(f"tg-fail:{str(ex)[:60]}")

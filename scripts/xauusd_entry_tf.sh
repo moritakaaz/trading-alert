@@ -26,6 +26,8 @@ TF_BARS = {"m1": 600, "m5": 300, "m15": 200}[TF]
 KRAKEN_INT = {"m1": 1, "m5": 5, "m15": 15}[TF]
 HOOK_ID = f"xauusd-entry-{TF}"
 TF_UP = TF.upper()
+# B06 (P1): single strategy version constant for all labels and journal
+STRATEGY_VERSION = "2.5"
 
 def out(decision, reason, payload=None):
     print("HATCH_HOOK_RESULT:" + json.dumps(
@@ -130,6 +132,23 @@ def save_journal_rows(update_fn):
         finally:
             fcntl.flock(lf, fcntl.LOCK_UN)
 
+def _curl_noleak(url, args, timeout=30):
+    """B30 (P1): run curl without exposing the bot token in process argv.
+    The URL (which contains the token) is passed via a -K config file,
+    so `ps` output never shows the token."""
+    import tempfile
+    _cfg = tempfile.NamedTemporaryFile(mode="w", suffix=".curlcfg", delete=False)
+    try:
+        _cfg.write('url = "%s"\n' % url.replace('"', "%22"))
+        _cfg.close()
+        return subprocess.run(["curl", "-K", _cfg.name] + args,
+                              capture_output=True, timeout=timeout)
+    finally:
+        try:
+            os.unlink(_cfg.name)
+        except Exception:
+            pass
+
 def tg_send(text, photo=None, caption=None, silent=False, keyboard=None):
     # push alert to Faqih's Telegram via the dedicated alert bot
     # (@ahsudahlah_bot); silent on any failure, never on dry runs;
@@ -155,21 +174,20 @@ def tg_send(text, photo=None, caption=None, silent=False, keyboard=None):
         # B01 (P0): ALWAYS send text via sendMessage first (checked).
         # Photo sent separately with short caption. If photo fails,
         # text alert is not lost.
-        cmd = ["curl", "-s", "-m", "25",
+        _args = ["-s", "-m", "25",
                "--data-urlencode", "chat_id=" + cid,
                "--data-urlencode", "text=" + esc(text[:4096]),
                "--data-urlencode", "parse_mode=HTML"]
         if silent:
-            cmd += ["--data-urlencode", "disable_notification=true"]
+            _args += ["--data-urlencode", "disable_notification=true"]
         if keyboard:
-            cmd += ["--data-urlencode",
+            _args += ["--data-urlencode",
                     "reply_markup=" + json.dumps(keyboard, separators=(",", ":"))]
-        cmd.append(base + "/sendMessage")
         # retry once on failure (transient network/proxy/rate-limit)
         sent = False
         for attempt in range(2):
             try:
-                r = subprocess.run(cmd, capture_output=True, timeout=30)
+                r = _curl_noleak(base + "/sendMessage", _args, timeout=30)
                 if b'"ok":true' in (r.stdout or b""):
                     sent = True
                     break
@@ -187,13 +205,13 @@ def tg_send(text, photo=None, caption=None, silent=False, keyboard=None):
         if photo and os.path.isfile(photo):
             try:
                 _cap = (caption or f"📊 Chart")[:1000]
-                pr = subprocess.run(["curl", "-s", "-m", "25",
+                pr = _curl_noleak(base + "/sendPhoto",
+                                ["-s", "-m", "25",
                                 "-F", "chat_id=" + cid,
                                 "-F", "photo=@" + photo,
                                 "-F", "caption=" + esc(_cap),
-                                "-F", "parse_mode=HTML",
-                                base + "/sendPhoto"],
-                               capture_output=True, timeout=30)
+                                "-F", "parse_mode=HTML"],
+                               timeout=30)
                 if b'"ok":true' in (pr.stdout or b""):
                     log(HOOK_ID, "tg-photo-sent")
                 else:
@@ -227,30 +245,28 @@ def tg_edit_or_send(text, state_key, silent=True):
         msg_id = st.get(state_key)
         # try editing the previous message
         if msg_id:
-            cmd = ["curl", "-s", "-m", "25",
+            _args = ["-s", "-m", "25",
                    "--data-urlencode", "chat_id=" + cid,
                    "--data-urlencode", "message_id=" + str(msg_id),
                    "--data-urlencode", "text=" + esc(text),
-                   "--data-urlencode", "parse_mode=HTML",
-                   base + "/editMessageText"]
+                   "--data-urlencode", "parse_mode=HTML"]
             try:
-                r = subprocess.run(cmd, capture_output=True, timeout=30)
+                r = _curl_noleak(base + "/editMessageText", _args, timeout=30)
                 if b'"ok":true' in (r.stdout or b""):
                     log(HOOK_ID, "tg-heartbeat-edited")
                     return True
             except Exception:
                 pass
             # edit failed (too old/deleted) — fall through to send new
-        cmd = ["curl", "-s", "-m", "25",
+        _args = ["-s", "-m", "25",
                "--data-urlencode", "chat_id=" + cid,
                "--data-urlencode", "text=" + esc(text),
                "--data-urlencode", "parse_mode=HTML"]
         if silent:
-            cmd += ["--data-urlencode", "disable_notification=true"]
-        cmd.append(base + "/sendMessage")
+            _args += ["--data-urlencode", "disable_notification=true"]
         for attempt in range(2):
             try:
-                r = subprocess.run(cmd, capture_output=True, timeout=30)
+                r = _curl_noleak(base + "/sendMessage", _args, timeout=30)
                 out_b = r.stdout or b""
                 if b'"ok":true' in out_b:
                     # extract message_id for next edit
@@ -333,7 +349,7 @@ except Exception as e:
         tfbars = kraken("PAXGUSD", KRAKEN_INT); h1 = kraken("PAXGUSD", 60)
         src = "Kraken PAXGUSD (fallback)"
     except Exception as e2:
-        log(HOOK_ID, "all-price-fail"); out("silent", "price-fetch-failed")
+        log(HOOK_ID, "price-fetch-failed"); out("silent", "price-fetch-failed")
 
 # last CLOSED bars
 tfb = now - (now % TF_SECS)
@@ -369,6 +385,11 @@ def _ema(vals, period):
 a1 = atr14(h1c)
 if a1 <= 0:
     log(HOOK_ID, "bad-atr"); out("silent", "bad-atr")
+# B26 (P1): persist H1 ATR so /lot_calc uses live value, not hardcoded 12.0
+try:
+    save_state_keys({"last_atr_h1": round(a1, 2)})
+except Exception:
+    pass
 
 # (v2.1: M15 trend block removed — filter was dropped; H1 EMA kept for display)
 
@@ -451,7 +472,7 @@ def detect_dtb():
     k = n - 1  # sig_bar: must be the confirmation candle
     so, sc = closed_tf[k][1], closed_tf[k][4]
     # double tops -> SELL
-    for p2 in range(max(2, k - 24), k):
+    for p2 in range(k - 1, max(1, k - 24), -1):  # B16: newest first
         if not is_peak[p2]:
             continue
         # v2.3: p1 = nearest peak that forms a VALID pattern (not just nearest).
@@ -489,7 +510,7 @@ def detect_dtb():
                             "score": _score, "grade": _grade,
                             "rsi_div": _rsi_div}
     # double bottoms -> BUY
-    for p2 in range(max(2, k - 24), k):
+    for p2 in range(k - 1, max(1, k - 24), -1):  # B16: newest first
         if not is_valley[p2]:
             continue
         # v2.3: p1 = nearest valley that forms a VALID pattern
@@ -547,7 +568,7 @@ def detect_setup():
     so, sc = closed_tf[k][1], closed_tf[k][4]
     best = None  # (p2, sig, pattern) — keep the most recent
     # double tops forming -> potential SELL
-    for p2 in range(max(2, k - 24), k):
+    for p2 in range(k - 1, max(1, k - 24), -1):  # B16: newest first
         if not is_peak[p2]:
             continue
         # v2.3: first-valid p1
@@ -587,7 +608,7 @@ def detect_setup():
                              "score": _score, "grade": _grade,
                              "rsi_div": _rsi_div})
     # double bottoms forming -> potential BUY
-    for p2 in range(max(2, k - 24), k):
+    for p2 in range(k - 1, max(1, k - 24), -1):  # B16: newest first
         if not is_valley[p2]:
             continue
         # v2.3: first-valid p1
@@ -1053,7 +1074,7 @@ if sig is None:
                 f"DAN berwarna {'merah' if _setup_sig == 'SELL' else 'hijau'}. "
                 f"Stop order bisa terisi saat harga hanya menyentuh level (sebelum close).\n"
                 f"🎯 Entry ${_neck:.2f} · 🛑 SL ${_sl} · TP1 ${_t1} · TP2 ${_t2} · TP3 ${_t3}\n"
-                f"\n🕐 {_wib} WIB [setup v2.4]"
+                f"\n🕐 {_wib} WIB [setup v2.5]"
             )
             # chart of the forming pattern
             _chart_dir = os.path.expanduser("~/workspace/trading-ea/charts")
@@ -1069,6 +1090,7 @@ if sig is None:
                 "sl": 0, "tp1": 0, "tp2": 0, "tp3": 0,
                 "bar_time_wib": _wib, "out": _chart_path,
                 "setup_mode": True,
+                "tf": TF_UP,  # B17: so chart title shows correct TF
             }
             _tmp_in = _chart_path + ".json"
             json.dump(_chart_in, open(_tmp_in, "w"))
@@ -1092,6 +1114,16 @@ if sig is None:
             heartbeat_maybe("no-signal")
     else:
         heartbeat_maybe("no-signal")
+
+# B48 (P1): suppress ENTRY on fallback feed (Kraken PAXGUSD is a proxy,
+# not XAU/USD — breakout levels would be wrong). Warn only, don't journal.
+if sig and "fallback" in src.lower():
+    log(HOOK_ID, "entry-suppressed-fallback")
+    tg_send(f"⚠️ <b>Signal suppressed</b> ({TF_UP}): {sig} pattern detected "
+            f"but price feed is on Kraken PAXGUSD fallback, not XAU/USD. "
+            f"No entry alert sent.",
+            silent=False)
+    out("silent", "entry-suppressed-fallback")
 
 if st.get("last_bar") == bar_iso:
     log(HOOK_ID, "dup"); out("silent", "already-alerted")
@@ -1200,7 +1232,9 @@ try:
                        text=True, timeout=40)
     d = json.loads(r.stdout or "{}")
     items = [n for n in d.get("news", []) if n.get("t") and now - n["t"] < 12 * 3600]
-    kw = re.compile(r"gold|xau|fed|fomc|powell|dollar|nfp|non-?farm|cpi|inflation|rate", re.I)
+    # B37 (P1): narrowed 'rate' -> specific phrases to avoid false positives
+    kw = re.compile(r"gold|xau|fed|fomc|powell|dollar|nfp|non-?farm|cpi|inflation|"
+                    r"rate decision|interest rate|ecb|boe|boj|rba", re.I)
     hot = re.compile(r"nfp|non-?farm payroll|cpi|fomc|rate decision|powell", re.I)
     ranked = sorted(items, key=lambda n: (not kw.search(n.get("headline", "") or ""), -(n["t"] or 0)))
     for n in ranked[:2]:
@@ -1298,6 +1332,8 @@ lines = [f"🚨 ENTRY XAUUSD ({TF_UP}): {dir_emoji} {sig}",
           if pattern.get('grade') else ""),
          "",
          f"🎯 Entry: ${price}",
+         f"📐 Neckline: ${pattern['neck']:.2f} (trigger) · Close: ${sig_bar[4]:.2f}"
+         if pattern.get("neck") is not None else "",
          f"🛑 SL: ${sl_px} (${sl_d} from entry)",
          f"🎯 TP1: ${tp1_px} (${tp1_d} from entry, 1R) → move SL to breakeven",
          f"🎯 TP2: ${tp2_px} (${tp2_d} from entry, 1.5R)",
@@ -1322,17 +1358,14 @@ if risk_pct > _risk_limit:
 lines.extend([
          f"Levels from ref price ({src}) — may differ slightly vs your broker, adjust",
          ""])
-# fallback transparency: Kraken PAXGUSD is a proxy, not XAU/USD directly
-if "fallback" in src.lower():
-    lines.append("⚠️ [FALLBACK] Price from Kraken PAXGUSD, not XAU/USD directly")
-    log(HOOK_ID, "alert-on-fallback-feed")
+# (B48: fallback ENTRY suppressed above; this block kept for reference)
 lines.extend(cal_lines)
 if warn:
     lines.append("\u26A0\uFE0F Headline mentions a high-impact event (NFP/CPI/FOMC) — watch out for volatility")
 for hl in headlines:
     lines.append(f"\U0001F4F0 {hl}")
 lines.append("")
-lines.append("Not financial advice, manage your own risk. Experimental v2.4 multi-position signal. [strat v2.4]")
+lines.append("Not financial advice, manage your own risk. Experimental v2.5 multi-position signal. [strat v2.5]")
 msg = "\n".join(lines)
 
 # --- entry chart (candles + pattern + SL/TP) ---
@@ -1351,6 +1384,7 @@ try:
                     if k in pattern},
         "signal": sig, "entry": price, "tf": TF_UP,
         "sl": sl_d, "tp1": tp1_d, "tp2": tp2_d, "tp3": tp3_d,
+        "sig_t": sig_bar[0],  # B17: signal bar timestamp for chart marker
         "bar_time_wib": datetime.datetime.fromtimestamp(sig_bar[0], datetime.timezone.utc)
                          .astimezone(WIB).strftime("%d %b %H:%M"),
         "out": chart_path,
@@ -1386,7 +1420,7 @@ if os.environ.get("HATCH_HOOK_DRY_RUN") != "1":
     def _append_signal(rows):
         # strategy version for performance comparison across logic changes
         # v2.1 brutal: -dtb = double top/bottom touch, -donch = Donchian breakout
-        sv = "2.4-" + ("dtb" if pattern["kind"] in ("DOUBLE TOP", "DOUBLE BOTTOM")
+        sv = STRATEGY_VERSION + "-" + ("dtb" if pattern["kind"] in ("DOUBLE TOP", "DOUBLE BOTTOM")
                        else "donch")
         row = {"alert_time_utc": bar_iso, "signal": sig, "entry_ref": price,
                "sl_d": sl_d, "tp1_d": tp1_d, "tp2_d": tp2_d, "tp3_d": tp3_d,

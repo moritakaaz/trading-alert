@@ -17,6 +17,9 @@ def main():
     if not text:
         print("empty message", file=sys.stderr)
         sys.exit(1)
+    def esc(s):
+        # B19: escape HTML so raw < & in data don't cause Telegram parse errors
+        return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     tok = cid = None
     with open(os.path.expanduser("~/.tg-alert-bot/.env")) as f:
         for line in f:
@@ -27,14 +30,24 @@ def main():
     if not tok or not cid:
         print("no tg creds", file=sys.stderr)
         sys.exit(1)
-    cmd = ["curl", "-s", "-m", "30",
-           "--data-urlencode", f"chat_id={cid}",
-           "--data-urlencode", f"text={text}",
-           "--data-urlencode", "parse_mode=HTML"]
-    if silent:
-        cmd += ["--data-urlencode", "disable_notification=true"]
-    cmd.append(f"https://api.telegram.org/bot{tok}/sendMessage")
-    r = subprocess.run(cmd, capture_output=True, timeout=35)
+    # B30 (P1): token via -K config file, not in argv
+    import tempfile
+    _cfg = tempfile.NamedTemporaryFile(mode="w", suffix=".curlcfg", delete=False)
+    try:
+        _cfg.write('url = "%s"\n' % f"https://api.telegram.org/bot{tok}/sendMessage".replace('"', "%22"))
+        _cfg.close()
+        cmd = ["curl", "-K", _cfg.name, "-s", "-m", "30",
+               "--data-urlencode", f"chat_id={cid}",
+               "--data-urlencode", f"text={esc(text)}",
+               "--data-urlencode", "parse_mode=HTML"]
+        if silent:
+            cmd += ["--data-urlencode", "disable_notification=true"]
+        r = subprocess.run(cmd, capture_output=True, timeout=35)
+    finally:
+        try:
+            os.unlink(_cfg.name)
+        except Exception:
+            pass
     import json
     try:
         ok = json.loads(r.stdout or b"{}").get("ok")

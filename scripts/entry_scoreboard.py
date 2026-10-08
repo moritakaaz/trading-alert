@@ -170,9 +170,11 @@ def main():
         finally:
             fcntl.flock(lf, fcntl.LOCK_UN)
     # stats (outside lock, using the rows we just wrote)
-    closed = [r for r in rows if r["status"] == "closed"]
+    # B12 (P1): count expired rows too (engine writes status="expired" directly)
+    closed = [r for r in rows if r["status"] in ("closed", "expired")]
+    _n_open = sum(1 for r in rows if r["status"] == "open")
     if not closed:
-        print(f"alerts={len(rows)} open={len(rows)-len(closed)} updated={result.get('updated', 0)}")
+        print(f"alerts={len(rows)} open={_n_open} updated={result.get('updated', 0)}")
         return
     skipped_n = sum(1 for r in rows if r["status"] in ("skipped", "cancelled"))
     rs = []
@@ -185,7 +187,7 @@ def main():
     gross_win = sum(x for x in rs if x > 0)
     gross_loss = -sum(x for x in rs if x < 0)
     pf = (gross_win / gross_loss) if gross_loss > 0 else float("inf")
-    print(f"alerts={len(rows)} open={len(rows)-len(closed)} updated={result.get('updated', 0)} "
+    print(f"alerts={len(rows)} open={_n_open} updated={result.get('updated', 0)} "
           f"closed={len(closed)} winrate={wins/len(closed)*100:.0f}% "
           f"totalR={sum(rs):+.1f} avgR={sum(rs)/len(rs):+.2f} PF~{pf:.2f} "
           f"skipped={skipped_n}")

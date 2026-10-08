@@ -33,7 +33,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=14)
     a = ap.parse_args()
-    today = datetime.date.today()
+    # B36 (P1): use UTC date (not machine timezone)
+    today = datetime.datetime.now(datetime.timezone.utc).date()
     horizon = today + datetime.timedelta(days=a.days)
     out = []
     try:
@@ -42,6 +43,9 @@ def main():
                     f"&include_release_dates_with_no_data=true&sort_order=asc&limit=10000")
             for x in d.get("release_dates", []):
                 ds = x.get("date", "")
+                # B36: skip placeholder rows (no usable date)
+                if not ds or len(ds) < 10:
+                    continue
                 if today.isoformat() <= ds <= horizon.isoformat():
                     out.append({"date": ds, "name": name, "release_id": rid})
     except Exception as e:
