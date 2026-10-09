@@ -297,7 +297,8 @@ def status_text():
         tp1_px = round(at["entry"] + at["tp1_d"] * (1 if at["signal"] == "BUY" else -1), 2)
         pos_line = f"\n📌 {at['signal']} position @ ~${at['entry']} still open (TP1 ${tp1_px})"
     _m = st.get("modal") or {"amount": 600, "currency": "usc"}
-    _mu = "USC" if (_m.get("currency") or "usc") == "usc" else "USD"
+    _cur = (_m.get("currency") or "usc").lower()
+    _mu = {"usc": "USDc", "usd": "USD", "idr": "IDR"}.get(_cur, _cur.upper())
     # multi-TF switches (v2.1)
     _tf_lines = []
     for _tf in ("m1", "m5", "m15"):
