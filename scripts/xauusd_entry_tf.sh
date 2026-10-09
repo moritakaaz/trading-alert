@@ -984,6 +984,103 @@ def resolve_active_trade():
         return False, close_kind
     return True, None
 
+
+def sweep_open_positions(closed_tf, now):
+    """v2.5 multi-position: check ALL open journal rows for SL/TP hits,
+    not just the latest active_trade. Fixes 'stuck open' bug where old
+    positions were never monitored after a new signal overwrote active_trade.
+    Returns count of positions closed."""
+    closed_count = 0
+    try:
+        import csv as _csv
+        jpath = os.path.expanduser("~/hooks/state/entry_journal.csv")
+        with open(jpath) as jf:
+            rows = list(_csv.DictReader(jf))
+        # Get active_trade bar_ts to skip it (already handled by resolve_active_trade)
+        _at = st.get("active_trade") or {}
+        _at_bar = _at.get("bar_ts", 0)
+        for _r in rows:
+            if not _r or _r.get("status") != "open":
+                continue
+            if _r.get("timeframe") != TF:
+                continue
+            try:
+                _bar_ts = int(datetime.datetime.fromisoformat(
+                    _r["alert_time_utc"].replace("Z", "+00:00")).timestamp())
+            except Exception:
+                continue
+            if _bar_ts == _at_bar:
+                continue  # handled by resolve_active_trade
+            # 48h expiry check
+            if now - _bar_ts > 172800:
+                def _mk_expire(rs, _row=_r, _bts=_bar_ts):
+                    for _x in rs:
+                        if _x.get("alert_time_utc") == _row["alert_time_utc"] and _x.get("status") == "open":
+                            _x["status"] = "expired"
+                            _x["outcome"] = "expired"
+                            _x["closed_time_utc"] = datetime.datetime.fromtimestamp(
+                                now, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                            try:
+                                _last = closed_tf[-1][4] if closed_tf else float(_row["entry_ref"])
+                                _m = 1 if _row["signal"] == "BUY" else -1
+                                _pnl = (_last - float(_row["entry_ref"])) * _m
+                                _x["r_multiple"] = str(round(_pnl / float(_row["sl_d"]), 2))
+                            except Exception:
+                                _x["r_multiple"] = "0"
+                            break
+                    return True
+                try:
+                    save_journal_rows(_mk_expire)
+                    log(HOOK_ID, f"sweep-expired:{_r['signal']}@{_r['entry_ref']}")
+                    closed_count += 1
+                except Exception as _ex:
+                    log(HOOK_ID, f"sweep-expire-fail:{str(_ex)[:40]}")
+                continue
+            # SL/TP check using closed bars after signal
+            try:
+                _entry = float(_r["entry_ref"])
+                _sl_d = float(_r["sl_d"])
+                _tp1_d = float(_r["tp1_d"])
+                _sig = _r["signal"]
+                _bars = [b for b in closed_tf if b[0] > _bar_ts]
+                _hit = None
+                for _b in _bars:
+                    if _sig == "BUY":
+                        if _b[3] <= _entry - _sl_d:
+                            _hit = "SL"; break
+                        if _b[2] >= _entry + _tp1_d:
+                            _hit = "TP1"; break
+                    else:
+                        if _b[2] >= _entry + _sl_d:
+                            _hit = "SL"; break
+                        if _b[3] <= _entry - _tp1_d:
+                            _hit = "TP1"; break
+                if _hit:
+                    _outcome = "-1R" if _hit == "SL" else "+1R"
+                    def _mk_close(rs, _row=_r, _hk=_hit, _oc=_outcome):
+                        for _x in rs:
+                            if _x.get("alert_time_utc") == _row["alert_time_utc"] and _x.get("status") == "open":
+                                _x["status"] = "closed"
+                                _x["outcome"] = _hk
+                                _x["closed_time_utc"] = datetime.datetime.fromtimestamp(
+                                    now, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                                _x["r_multiple"] = "-1" if _hk == "SL" else "1"
+                                break
+                        return True
+                    save_journal_rows(_mk_close)
+                    # Notify
+                    _emoji = "🛑" if _hit == "SL" else "🎯"
+                    tg_send(f"{_emoji} <b>{_hit} HIT</b> — {_sig} @ ${_entry:.0f}\n"
+                            f"Swept from open positions (multi-position mode).",
+                            silent=False)
+                    log(HOOK_ID, f"sweep-closed:{_hit}:{_sig}@{_r['entry_ref']}")
+                    closed_count += 1
+            except Exception as _ex:
+                log(HOOK_ID, f"sweep-check-fail:{str(_ex)[:40]}")
+    except Exception as _ex:
+        log(HOOK_ID, f"sweep-fail:{str(_ex)[:40]}")
+    return closed_count
+
 def resolve_runner():
     # v1.3 runner tracking: post-TP1 watch for TP2/TP3 touches and breakeven
     # retest on M5 bars. Each event notifies exactly once via Telegram, then
@@ -1051,16 +1148,27 @@ def resolve_runner():
         log(HOOK_ID, "runner-breakeven")
     if hit in ("TP2", "TP3"):
         # journal max_tp upgrade (informational; scoreboard recomputes anyway)
+        # Match by signal+entry+TF (robust) instead of timestamp-only
         def _runner_update(rows):
-            _bar_iso = datetime.datetime.fromtimestamp(
-                rn.get("bar_ts", 0), datetime.timezone.utc).strftime(
-                "%Y-%m-%dT%H:%M:%SZ")
             _order = {"": 0, "TP1": 1, "TP2": 2, "TP3": 3}
+            _rn_entry = float(rn.get("entry", 0))
+            _rn_sig = rn.get("signal", "")
             for _r in rows:
-                if _r.get("alert_time_utc") == _bar_iso:
-                    if _order.get(hit, 0) > _order.get(_r.get("max_tp") or "", 0):
-                        _r["max_tp"] = hit
-                    break
+                if _r.get("status") != "open":
+                    continue
+                if _r.get("timeframe") != TF:
+                    continue
+                if _r.get("signal") != _rn_sig:
+                    continue
+                try:
+                    if abs(float(_r.get("entry_ref", 0)) - _rn_entry) > 1.0:
+                        continue
+                except Exception:
+                    continue
+                if _order.get(hit, 0) > _order.get(_r.get("max_tp") or "", 0):
+                    _r["max_tp"] = hit
+                    log(HOOK_ID, f"journal-max_tp-updated:{hit}:{_rn_sig}@{_rn_entry:.0f}")
+                break
             return True
         try:
             save_journal_rows(_runner_update)
@@ -1076,6 +1184,13 @@ def resolve_runner():
 # path), so with no new signal the open trade was never checked.
 _mon_active, _mon_closed = resolve_active_trade()
 resolve_runner()
+# v2.5 multi-position: sweep ALL open journal rows for SL/TP (not just latest)
+try:
+    _swept = sweep_open_positions(closed_tf, now)
+    if _swept:
+        log(HOOK_ID, f"sweep-closed-{_swept}-positions")
+except Exception as _ex:
+    log(HOOK_ID, f"sweep-call-fail:{str(_ex)[:40]}")
 
 # v2.5: master switch check AFTER monitoring. SL/TP notifications continue
 # even when alerts are off (positions are real). New signals and heartbeat
