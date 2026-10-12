@@ -1153,9 +1153,9 @@ def resolve_runner():
             _order = {"": 0, "TP1": 1, "TP2": 2, "TP3": 3}
             _rn_entry = float(rn.get("entry", 0))
             _rn_sig = rn.get("signal", "")
-            for _r in rows:
-                if _r.get("status") != "open":
-                    continue
+            # match newest row first; the trade's row is already closed once
+            # TP1 hit, but the runner keeps going — max_tp must still upgrade
+            for _r in reversed(rows):
                 if _r.get("timeframe") != TF:
                     continue
                 if _r.get("signal") != _rn_sig:

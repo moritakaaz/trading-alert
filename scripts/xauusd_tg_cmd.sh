@@ -11,7 +11,7 @@ JOURNAL="$HOME/hooks/state/entry_journal.csv"
 mkdir -p "$(dirname "$STATE_FILE")"
 
 python3 - "$STATE_FILE" "$OFFSET_FILE" "$ALERT_LOG" "$JOURNAL" <<'PYEOF'
-import json, sys, time, subprocess, urllib.request, urllib.parse, datetime, os, csv
+import json, sys, time, re, subprocess, urllib.request, urllib.parse, datetime, os, csv
 
 STATE_FILE, OFFSET_FILE, ALERT_LOG, JOURNAL = sys.argv[1:5]
 DRY = os.environ.get("HATCH_HOOK_DRY_RUN") == "1"
@@ -372,6 +372,15 @@ def history_text(page=0):
             lv = ""
         oc = (r.get("outcome") or "").strip()
         rm = (r.get("r_multiple") or "").strip()
+        mtp = (r.get("max_tp") or "").strip()
+        # runner may have pushed beyond the locked outcome (e.g. TP1 -> TP3);
+        # show the highest TP reached
+        def _tp_lvl(s):
+            m = re.match(r"TP([123])", s or "")
+            return int(m.group(1)) if m else 0
+        if _tp_lvl(mtp) > _tp_lvl(oc):
+            oc = mtp
+            rm = {1: "1", 2: "1.5", 3: "2"}[_tp_lvl(mtp)]
         if r["status"] == "open":
             res = "⏳ open"
         elif oc == "SL":
