@@ -1,7 +1,8 @@
 #!/bin/bash
-# XAUUSD multi-timeframe entry alerts (v2.1 brutal): double top/bottom +
-# Donchian(48) H1 second trigger, no trend filter. Parameterized by TF env var
-# (m1|m5|m15). SL/TP from H1 ATR(14).
+# XAUUSD multi-timeframe entry alerts: double top/bottom pattern trigger.
+# v2.6 (2026-10-16): Donchian(48) H1 entry trigger DISABLED (see
+# DONCHIAN_TRIGGER_ENABLED below) — patterns are the only entry trigger.
+# Parameterized by TF env var (m1|m5|m15). SL/TP from H1 ATR(14).
 # Price: Twelve Data XAU/USD (fallback Kraken PAXGUSD). News: Finnhub forex headlines.
 # Signal per confirmation bar, forex hours only, deduped by signal bar.
 TF="${TF:-m5}"
@@ -27,7 +28,15 @@ KRAKEN_INT = {"m1": 1, "m5": 5, "m15": 15}[TF]
 HOOK_ID = f"xauusd-entry-{TF}"
 TF_UP = TF.upper()
 # B06 (P1): single strategy version constant for all labels and journal
-STRATEGY_VERSION = "2.5"
+STRATEGY_VERSION = "2.6"
+# v2.6 (2026-10-16, user-approved): Donchian(48) H1 entry trigger OFF.
+# Live journal evidence (61 signals, 8-16 Oct 2026): Donchian entries were
+# 5 TP vs 18 SL = -12.67R, and stayed negative (-5R) even after simulating
+# one-entry-per-breakout dedupe, while double top/bottom patterns were the
+# only non-losing trigger (+1.0R). Would-be Donchian breakouts are still
+# logged (reason donchian-disabled) so the decision can be re-evaluated.
+# Flip to True to re-enable the trigger; no other change needed.
+DONCHIAN_TRIGGER_ENABLED = False
 
 def out(decision, reason, payload=None):
     print("HATCH_HOOK_RESULT:" + json.dumps(
@@ -728,15 +737,25 @@ sig, pattern = detect_dtb()
 # Channel = prior 48 completed H1 bars; trigger = M5 close beyond the band.
 # v2.4 FIX #1: edge trigger — only fire on FIRST breakout (prev close inside band).
 # Without this, every bar while price stays outside the channel re-triggers.
+# v2.6: trigger DISABLED by default (DONCHIAN_TRIGGER_ENABLED=False, see top).
+# Breakouts are still detected and logged so their hypothetical outcomes can
+# be reviewed later; they no longer produce entry signals or journal rows.
 if not sig and len(h1c) >= 48:
     _d_up = max(b[2] for b in h1c[-48:])
     _d_dn = min(b[3] for b in h1c[-48:])
     _prev_c = prev_bar[4]
+    _donch_sig = None
     if sig_bar[4] > _d_up and _prev_c <= _d_up:
+        _donch_sig = "BUY"
+    elif sig_bar[4] < _d_dn and _prev_c >= _d_dn:
+        _donch_sig = "SELL"
+    if _donch_sig and not DONCHIAN_TRIGGER_ENABLED:
+        log(HOOK_ID, f"donchian-disabled:{_donch_sig}@{_d_up if _donch_sig == 'BUY' else _d_dn:.2f}")
+    elif _donch_sig == "BUY":
         sig, pattern = "BUY", {"kind": "DONCHIAN BREAKOUT", "neck": _d_up,
                                "upper": _d_up, "lower": _d_dn,
                                "p2_t": bar_iso}
-    elif sig_bar[4] < _d_dn and _prev_c >= _d_dn:
+    elif _donch_sig == "SELL":
         sig, pattern = "SELL", {"kind": "DONCHIAN BREAKOUT", "neck": _d_dn,
                                 "upper": _d_up, "lower": _d_dn,
                                 "p2_t": bar_iso}
@@ -1260,7 +1279,7 @@ if sig is None:
                 f"AND is {'red' if _setup_sig == 'SELL' else 'green'}. "
                 f"A stop order can fill on a mere touch of the level (before close).\n"
                 f"🎯 Entry ${_neck:.2f} · 🛑 SL ${_sl} · TP1 ${_t1} · TP2 ${_t2} · TP3 ${_t3}\n"
-                f"\n🕐 {_wib} WIB [setup v2.5]"
+                f"\n🕐 {_wib} WIB [setup v2.6]"
             )
             # chart of the forming pattern
             _chart_dir = os.path.expanduser(os.environ.get("CHART_DIR", "~/workspace/trading-ea/charts"))
@@ -1588,7 +1607,7 @@ if warn:
 for hl in headlines:
     lines.append(f"\U0001F4F0 {hl}")
 lines.append("")
-lines.append("Not financial advice, manage your own risk. Experimental v2.5 multi-position signal. [strat v2.5]")
+lines.append("Not financial advice, manage your own risk. Experimental v2.6 multi-position signal. [strat v2.6]")
 msg = "\n".join(lines)
 
 # --- entry chart (candles + pattern + SL/TP) ---
@@ -1683,7 +1702,7 @@ _cap_lines = [
 if risk_pct > _risk_limit:
     _cap_lines.append(f"⚠️ RISK {risk_pct:.1f}% (>{_risk_limit}%) — consider skipping")
 _cap_lines.append("")
-_cap_lines.append("Not financial advice. [strat v2.5]")
+_cap_lines.append("Not financial advice. [strat v2.6]")
 _caption = "\n".join(_cap_lines)
 # Send as single photo+caption message with keyboard
 _tg_ok = tg_send_photo_only(_caption, chart_path, silent=False,

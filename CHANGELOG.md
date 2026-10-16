@@ -4,6 +4,21 @@ All notable changes, newest first. Strategy parameters (ATR 14, N=2,
 5–50 bars, Donchian 48, SL 1.5×ATR, TP 1R/1.5R/2R) are never changed
 without the owner's explicit approval.
 
+## v2.6 (2026-10-16, owner-approved)
+
+- Donchian(48) H1 entry trigger DISABLED via `DONCHIAN_TRIGGER_ENABLED =
+  False` in `scripts/xauusd_entry_tf.sh`. Evidence: live journal 8–16 Oct
+  2026 — Donchian 24 closed = −12.67R (5 TP / 18 SL), still −5R after a
+  simulated one-entry-per-breakout dedupe; double top/bottom patterns were
+  the only non-losing trigger (+1.00R). Would-be breakouts are logged as
+  `donchian-disabled:<DIR>@<level>` for later re-evaluation; flipping the
+  flag re-enables the trigger with no other change.
+- Strategy version bumped 2.5 → 2.6 (journal `strategy_v`, alert footers,
+  setup-watch label). Pattern logic, SL/TP, and management unchanged.
+- Verified: bash -n, Python compile, 5-case functional test of the gated
+  block (suppress BUY/SELL, re-enable path, inside-channel, continuation),
+  dry-run with state + journal untouched.
+
 ## Unreleased (P3)
 
 - B54: `scripts/signals.py` — pure signal functions (`detect_dtb`,

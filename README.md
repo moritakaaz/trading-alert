@@ -5,25 +5,34 @@
 > without understanding the risks.
 
 An **XAUUSD** multi-timeframe entry-alert system that pushes signals to Telegram:
-pattern breakouts + Donchian breakouts, automatic journaling, entry charts,
+pattern breakouts, automatic journaling, entry charts,
 position monitoring (TP1/TP2/TP3 + breakeven), and weekly performance reviews.
 
 Three independent alert systems: **M1** (1-min poll), **M5** (5-min poll),
 **M15** (5-min poll). Each has its own on/off switch and journal.
 
-## Strategy (v2.5, live)
+## Strategy (v2.6, live)
 
-> Experimental — no trend filter, dual trigger, high frequency, quality-scored.
+> Experimental — no trend filter, single pattern trigger, quality-scored.
 
 | Component | Detail |
 |---|---|
-| Trigger 1 (priority) | Double top/bottom on signal TF: M5 fractal peaks/valleys (N=2), \|p1-p2\| ≤ 0.25×ATR(H1), 5–50 bars apart, intervening extreme ≥3 bars from each side, no higher-high/lower-low between peaks (clean check), confirmation = close beyond neckline with right color. p1 = nearest peak forming a valid pattern |
-| Trigger 2 | Donchian(48) breakout on completed H1 bars, evaluated on signal-TF close (no EMA filter). Note: Donchian does NOT require candle-color confirmation (unlike double top/bottom) |
+| Trigger 1 (only) | Double top/bottom on signal TF: M5 fractal peaks/valleys (N=2), \|p1-p2\| ≤ 0.25×ATR(H1), 5–50 bars apart, intervening extreme ≥3 bars from each side, no higher-high/lower-low between peaks (clean check), confirmation = close beyond neckline with right color. p1 = nearest peak forming a valid pattern |
+| Trigger 2 | Donchian(48) breakout — **DISABLED in v2.6** (`DONCHIAN_TRIGGER_ENABLED = False` in `xauusd_entry_tf.sh`). Breakouts are still detected and logged (`donchian-disabled`) for later review, but produce no entry signals. Re-enable by flipping the flag |
 | Quality score | Every pattern scored 0-100 (Grade A/B/C): peak match 25 + RSI divergence 20 + height 15 + symmetry 10 + prior trend 15. Shown in alerts, informational only |
 | Stop loss | 1.5 × ATR(14) H1 |
 | Take profit | TP1 1R → SL to breakeven, TP2 1.5R, TP3 2R (runner) |
 | Trend filter | **REMOVED** — all signals fire, both directions |
 | Management | Multi-position: new signals fire even with open trades; bot tracks latest for SL/TP |
+
+**v2.6 change (2026-10-16, owner-approved):** Donchian entry trigger disabled.
+Live journal evidence (61 signals, 8–16 Oct 2026, 58 closed, total −11.67R):
+Donchian entries scored 5 TP vs 18 SL = **−12.67R** (PF 0.30), and stayed
+negative (−5R) even in a simulated one-entry-per-breakout dedupe, while double
+top/bottom patterns were the only non-losing trigger (33 closed, +1.00R).
+One day (14 Oct, CPI) produced 20 signals / 18 SL / −16R, mostly stacked
+Donchian re-breaks of the same move. The Donchian channel is still drawn on
+charts; only the entry trigger is off.
 
 **v2.5 reliability fixes:**
 - SL/TP + runner monitoring runs on **every poll** (not just via heartbeat)
