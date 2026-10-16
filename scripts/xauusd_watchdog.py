@@ -28,6 +28,13 @@ except ImportError:
 STATE = os.path.expanduser("~/hooks/state/xauusd_entry_m5.json")
 WD_STATE = os.path.expanduser("~/hooks/state/watchdog_state.json")  # B35: watchdog dedupe in its own file
 LOG = os.path.expanduser("~/hooks/logs/xauusd-entry-m5.jsonl")
+WD_LOG = os.path.expanduser("~/hooks/logs/xauusd-watchdog.jsonl")
+# B62 (2026-10-17): lock file for the watchdog's own log. A delayed run can
+# overlap the next scheduled run; an unlocked prune_logs() "w"-rewrite used
+# to wipe the other run's freshly appended lines (exit 0, zero new log
+# lines). All writes to WD_LOG now go through this lock, and prune's
+# rewrite is tempfile + os.replace.
+WD_LOG_LOCK = WD_LOG + ".lock"
 DRY = os.environ.get("HATCH_HOOK_DRY_RUN") == "1"
 
 
@@ -35,9 +42,13 @@ def log(msg):
     line = json.dumps({"ts": int(time.time() * 1000), "hook": "xauusd-watchdog",
                        "msg": msg})
     try:
-        with open(os.path.expanduser("~/hooks/logs/xauusd-watchdog.jsonl"),
-                  "a") as f:
-            f.write(line + "\n")
+        with open(WD_LOG_LOCK, "a+") as lf:
+            fcntl.flock(lf, fcntl.LOCK_EX)
+            try:
+                with open(WD_LOG, "a") as f:
+                    f.write(line + "\n")
+            finally:
+                fcntl.flock(lf, fcntl.LOCK_UN)
     except Exception:
         pass
 
@@ -240,34 +251,53 @@ def prune_logs(days=14):
     """B57: rotate jsonl logs — keep only the last `days` days of entries.
 
     Idempotent and cheap: files are only rewritten when lines are dropped.
+    B62: the read+rewrite now runs under the log lock with tempfile +
+    os.replace, so a concurrent/overlapping watchdog run can no longer
+    wipe lines the other run appended (zero-new-lines symptom seen
+    2026-10-15/16/17 on delayed runs).
     """
+    import tempfile
     cutoff = time.time() - days * 86400
+
+    def keep(line):
+        try:
+            ts = json.loads(line).get("started_at_ms", 0) / 1000
+            return ts >= cutoff or ts == 0
+        except Exception:
+            return True  # keep unparseable lines rather than dropping
+
     for pat in ("~/hooks/logs/xauusd-entry-m1.jsonl",
                 "~/hooks/logs/xauusd-entry-m5.jsonl",
                 "~/hooks/logs/xauusd-entry-m15.jsonl",
                 "~/hooks/logs/xauusd-tg-cmd.jsonl",
                 "~/hooks/logs/xauusd-watchdog.jsonl"):
         p = os.path.expanduser(pat)
+        pruned_msg = None
         try:
-            with open(p) as f:
-                lines = f.readlines()
-        except FileNotFoundError:
-            continue
-        kept = []
-        for line in lines:
-            try:
-                ts = json.loads(line).get("started_at_ms", 0) / 1000
-                if ts >= cutoff or ts == 0:
-                    kept.append(line)
-            except Exception:
-                kept.append(line)  # keep unparseable lines rather than dropping
-        if len(kept) < len(lines):
-            try:
-                with open(p, "w") as f:
-                    f.writelines(kept)
-                log(f"pruned:{os.path.basename(p)}:{len(lines)}->{len(kept)}")
-            except Exception:
-                pass
+            with open(WD_LOG_LOCK, "a+") as lf:
+                fcntl.flock(lf, fcntl.LOCK_EX)
+                try:
+                    try:
+                        with open(p) as f:
+                            lines = f.readlines()
+                    except FileNotFoundError:
+                        continue
+                    kept = [l for l in lines if keep(l)]
+                    if len(kept) < len(lines):
+                        fd, tmp = tempfile.mkstemp(
+                            dir=os.path.dirname(p) or ".", prefix=".prunetmp")
+                        with os.fdopen(fd, "w") as f:
+                            f.writelines(kept)
+                        os.replace(tmp, p)
+                        pruned_msg = (f"pruned:{os.path.basename(p)}:"
+                                      f"{len(lines)}->{len(kept)}")
+                finally:
+                    fcntl.flock(lf, fcntl.LOCK_UN)
+        except Exception:
+            pass
+        # log() takes the same lock — call it only AFTER releasing it.
+        if pruned_msg:
+            log(pruned_msg)
 
 
 def _check_cmd_stale(now, cmd_mtime):
