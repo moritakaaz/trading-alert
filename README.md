@@ -11,7 +11,7 @@ position monitoring (TP1/TP2/TP3 + breakeven), and weekly performance reviews.
 Three independent alert systems: **M1** (1-min poll), **M5** (5-min poll),
 **M15** (5-min poll). Each has its own on/off switch and journal.
 
-## Strategy (v2.6, live)
+## Strategy (v2.7, live)
 
 > Experimental — no trend filter, single pattern trigger, quality-scored.
 
@@ -20,10 +20,11 @@ Three independent alert systems: **M1** (1-min poll), **M5** (5-min poll),
 | Trigger 1 (only) | Double top/bottom on signal TF: M5 fractal peaks/valleys (N=2), \|p1-p2\| ≤ 0.25×ATR(H1), 5–50 bars apart, intervening extreme ≥3 bars from each side, no higher-high/lower-low between peaks (clean check), confirmation = close beyond neckline with right color. p1 = nearest peak forming a valid pattern |
 | Trigger 2 | Donchian(48) breakout — **DISABLED in v2.6** (`DONCHIAN_TRIGGER_ENABLED = False` in `xauusd_entry_tf.sh`). Breakouts are still detected and logged (`donchian-disabled`) for later review, but produce no entry signals. Re-enable by flipping the flag |
 | Quality score | Every pattern scored 0-100 (Grade A/B/C): peak match 25 + RSI divergence 20 + height 15 + symmetry 10 + prior trend 15. Shown in alerts, informational only |
-| Stop loss | 1.5 × ATR(14) H1 |
+| Stop loss | 1.5 × ATR(14) H1 — computed on real market-hours bars only; synthetic weekend bars are filtered out first (v2.7) |
 | Take profit | TP1 1R → SL to breakeven, TP2 1.5R, TP3 2R (runner) |
 | Trend filter | **REMOVED** — all signals fire, both directions |
 | Management | Multi-position: new signals fire even with open trades; bot tracks latest for SL/TP |
+| Anti-stacking | Same-direction entry cooldown 2h (`ENTRY_COOLDOWN_SECS`): after an entry fires, same-direction entries are suppressed and the blocked pattern is consumed (v2.7) |
 
 **v2.6 change (2026-10-16, owner-approved):** Donchian entry trigger disabled.
 Live journal evidence (61 signals, 8–16 Oct 2026, 58 closed, total −11.67R):
@@ -33,6 +34,22 @@ top/bottom patterns were the only non-losing trigger (33 closed, +1.00R).
 One day (14 Oct, CPI) produced 20 signals / 18 SL / −16R, mostly stacked
 Donchian re-breaks of the same move. The Donchian channel is still drawn on
 charts; only the entry trigger is off.
+
+**v2.7 changes (2026-10-19, owner-delegated):** two fixes after a −7R day
+(7 signals, 7 SL) exposed stacked entries and a data bug. (1) **Weekend-bar
+filter:** Twelve Data fills the closed weekend (Fri 21:00 → Sun 22:00 UTC)
+with synthetic flat H1 bars (range ≈ $0.25); left in, they collapsed
+ATR(14) to $2.10 at the Monday open, producing a $3 stop that was hit in
+17 minutes. All 8 lifetime signals with sl_d ≤ $10 fired in the
+Sun 22:00–Mon 04:05 UTC window. H1 bars inside the close window are now
+excluded before ATR/EMA/Donchian use, and the H1 fetch was raised
+80 → 200 bars so ≥62 real bars remain (verified: same reconstruction now
+gives ATR $14.91 → sl_d $22). (2) **Same-direction cooldown 2h:** stacked
+same-direction entries are one correlated bet (19 Oct: 3 BUYs closed the
+same second). A journal simulation of the 2h cooldown over 8–19 Oct kept
+−7.68R of a −22.35R baseline; the skipped signals were worth −14.67R.
+Cooldown reduces damage; it does not create an edge — the pattern baseline
+remains ≈ breakeven and is still being evaluated.
 
 **v2.5 reliability fixes:**
 - SL/TP + runner monitoring runs on **every poll** (not just via heartbeat)

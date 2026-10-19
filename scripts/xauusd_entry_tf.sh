@@ -1,5 +1,14 @@
 #!/bin/bash
 # XAUUSD multi-timeframe entry alerts: double top/bottom pattern trigger.
+# v2.7 (2026-10-19): (1) H1 bars inside the weekend close window are
+# excluded before ATR/EMA/Donchian use — Twelve Data emits synthetic flat
+# bars while the market is closed, which collapsed ATR(14) to ~$2 at the
+# Monday open (sl_d $3, dead-on-arrival stops; all 8 lifetime sl_d<=$10
+# signals fired Sun 22:00-Mon 04:05 UTC). (2) Same-direction entry
+# cooldown 2h (ENTRY_COOLDOWN_SECS): journal clusters showed stacked
+# same-direction entries are a single correlated bet (19 Oct: 5 BUYs in
+# $4180-4187, 3 closed the same second, day -7R; cooldown simulation on
+# the full journal cut total loss -22.35R -> -7.68R at 2h).
 # v2.6 (2026-10-16): Donchian(48) H1 entry trigger DISABLED (see
 # DONCHIAN_TRIGGER_ENABLED below) — patterns are the only entry trigger.
 # Parameterized by TF env var (m1|m5|m15). SL/TP from H1 ATR(14).
@@ -28,7 +37,13 @@ KRAKEN_INT = {"m1": 1, "m5": 5, "m15": 15}[TF]
 HOOK_ID = f"xauusd-entry-{TF}"
 TF_UP = TF.upper()
 # B06 (P1): single strategy version constant for all labels and journal
-STRATEGY_VERSION = "2.6"
+STRATEGY_VERSION = "2.7"
+# v2.7 (2026-10-19, owner-delegated): same-direction entry cooldown.
+# After an entry fires, further entries in the SAME direction are
+# suppressed for this many seconds (the pattern is consumed, not
+# delayed). Journal simulation 8-19 Oct: 2h cooldown kept -7.68R of a
+# -22.35R baseline; skipped signals were worth -14.67R.
+ENTRY_COOLDOWN_SECS = 7200
 # v2.6 (2026-10-16, user-approved): Donchian(48) H1 entry trigger OFF.
 # Live journal evidence (61 signals, 8-16 Oct 2026): Donchian entries were
 # 5 TP vs 18 SL = -12.67R, and stayed negative (-5R) even after simulating
@@ -422,7 +437,7 @@ if not _alert_on and not _at_chk and not _runner_chk:
     out("silent", "alert-off")
 try:
     tfbars = td_ohlc(TF_INTERVAL, TF_BARS)  # pattern history for this TF
-    h1 = td_ohlc("1h", 80)
+    h1 = td_ohlc("1h", 200)  # v2.7: 200 so >=62 REAL bars remain after the weekend filter
 except Exception as e:
     log(HOOK_ID, f"twelvedata-fail:{str(e)[:80]}")
     try:
@@ -444,6 +459,26 @@ if now - sig_bar[0] > TF_SECS * 3:  # stale bar guard
 # completed H1 bars strictly before the signal bar's hour
 hour_start = sig_bar[0] - (sig_bar[0] % 3600)
 h1c = [b for b in h1 if b[0] < hour_start]
+# v2.7: drop bars inside the weekend close window (Fri 21:00 -> Sun 22:00
+# UTC, the same window the forex-hours gate uses). Twelve Data fills the
+# closed weekend with synthetic flat bars (range ~$0.25 at Friday's close);
+# leaving them in collapsed ATR(14) to ~$2 on Monday morning (sl_d $3)
+# and dragged EMA20/50 flat. Kraken fallback bars in this window are real
+# 24/7 crypto bars, but excluding them keeps H1 stats on gold-market
+# hours, consistent with the rest of the system.
+def _fx_market_open(ts):
+    _g = time.gmtime(ts)
+    if _g.tm_wday == 5:  # Saturday
+        return False
+    if _g.tm_wday == 6 and _g.tm_hour < 22:  # Sunday before reopen
+        return False
+    if _g.tm_wday == 4 and _g.tm_hour >= 21:  # Friday after close
+        return False
+    return True
+_h1c_real = [b for b in h1c if _fx_market_open(b[0])]
+if len(_h1c_real) != len(h1c):
+    log(HOOK_ID, f"h1-weekend-filtered:{len(h1c) - len(_h1c_real)}")
+    h1c = _h1c_real
 if len(h1c) < 62:
     log(HOOK_ID, "not-enough-h1"); out("silent", "not-enough-data")
 
@@ -1279,7 +1314,7 @@ if sig is None:
                 f"AND is {'red' if _setup_sig == 'SELL' else 'green'}. "
                 f"A stop order can fill on a mere touch of the level (before close).\n"
                 f"🎯 Entry ${_neck:.2f} · 🛑 SL ${_sl} · TP1 ${_t1} · TP2 ${_t2} · TP3 ${_t3}\n"
-                f"\n🕐 {_wib} WIB [setup v2.6]"
+                f"\n🕐 {_wib} WIB [setup v2.7]"
             )
             # chart of the forming pattern
             _chart_dir = os.path.expanduser(os.environ.get("CHART_DIR", "~/workspace/trading-ea/charts"))
@@ -1344,6 +1379,20 @@ if pattern and st.get("pattern_p2_t") == pattern.get("p2_t"):
 if st.get("paused_until", 0) > now:
     heartbeat_maybe("paused")
     log(HOOK_ID, "signal-paused")
+
+# v2.7: same-direction entry cooldown (anti-stacking). Stacked entries in
+# one direction inside a tight price band are one correlated bet, not
+# independent chances (19 Oct: 3 BUYs closed the same second). The blocked
+# pattern is CONSUMED (pattern_p2_t saved) so it cannot fire late at a
+# moved price when the cooldown expires; a genuinely new pattern later
+# is unaffected. Opposite-direction signals are not blocked.
+_le = st.get("last_entry_ts") or {}
+_le_last = _le.get(sig)
+if _le_last and now - _le_last < ENTRY_COOLDOWN_SECS:
+    if pattern:
+        save_state_keys({"pattern_p2_t": pattern["p2_t"]})
+    log(HOOK_ID, f"cooldown-blocked:{sig}")
+    out("silent", "cooldown-blocked")
 
 # v2.1 brutal: trend filter REMOVED — every signal fires, both directions.
 # (ema_trend is still computed above; shown in the alert intel
@@ -1607,7 +1656,7 @@ if warn:
 for hl in headlines:
     lines.append(f"\U0001F4F0 {hl}")
 lines.append("")
-lines.append("Not financial advice, manage your own risk. Experimental v2.6 multi-position signal. [strat v2.6]")
+lines.append("Not financial advice, manage your own risk. Experimental v2.7 multi-position signal. [strat v2.7]")
 msg = "\n".join(lines)
 
 # --- entry chart (candles + pattern + SL/TP) ---
@@ -1702,7 +1751,7 @@ _cap_lines = [
 if risk_pct > _risk_limit:
     _cap_lines.append(f"⚠️ RISK {risk_pct:.1f}% (>{_risk_limit}%) — consider skipping")
 _cap_lines.append("")
-_cap_lines.append("Not financial advice. [strat v2.6]")
+_cap_lines.append("Not financial advice. [strat v2.7]")
 _caption = "\n".join(_cap_lines)
 # Send as single photo+caption message with keyboard
 _tg_ok = tg_send_photo_only(_caption, chart_path, silent=False,
@@ -1711,7 +1760,10 @@ _tg_ok = tg_send_photo_only(_caption, chart_path, silent=False,
 # If tg_send failed, don't save — signal will be retried next poll.
 if _tg_ok:
     st["last_bar"] = bar_iso
-    save_state_keys({"last_bar": bar_iso, "pattern_p2_t": pattern["p2_t"]})
+    _le_save = dict(st.get("last_entry_ts") or {})
+    _le_save[sig] = now
+    save_state_keys({"last_bar": bar_iso, "pattern_p2_t": pattern["p2_t"],
+                     "last_entry_ts": _le_save})
 else:
     log(HOOK_ID, "tg-send-failed-dedupe-not-saved-will-retry")
 out("wake", f"{HOOK_ID}-{sig.lower()}",

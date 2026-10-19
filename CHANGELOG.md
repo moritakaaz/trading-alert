@@ -4,6 +4,31 @@ All notable changes, newest first. Strategy parameters (ATR 14, N=2,
 5–50 bars, Donchian 48, SL 1.5×ATR, TP 1R/1.5R/2R) are never changed
 without the owner's explicit approval.
 
+## v2.7 (2026-10-19, owner-delegated)
+
+- Weekend-bar filter (bug fix): H1 bars inside the weekend close window
+  (Fri 21:00 → Sun 22:00 UTC) are excluded before ATR/EMA/Donchian use.
+  Twelve Data emits synthetic flat bars (range ≈ $0.25) while the market
+  is closed; at the 18 Oct 23:00 UTC signal they made ATR(14) = $2.10 →
+  sl_d $3 (SL in 17 min). All 8 lifetime sl_d ≤ $10 signals fired in that
+  window. H1 fetch raised 80 → 200 bars so the ≥62-bar guard counts real
+  bars. Verified on live data: filtered ATR $14.91 → sl_d $22.
+- Same-direction entry cooldown 2h (`ENTRY_COOLDOWN_SECS = 7200`,
+  state key `last_entry_ts`): after an entry fires, same-direction
+  entries are suppressed; the blocked pattern is consumed via
+  `pattern_p2_t` so it cannot fire late. Evidence: 19 Oct = 7 signals /
+  7 SL / −7R with 5 BUYs stacked in $4180–4187 (3 closed the same
+  second). Journal simulation: 2h cooldown kept −7.68R vs −22.35R
+  baseline; skipped set worth −14.67R.
+- Strategy version bumped 2.6 → 2.7 (journal `strategy_v`, alert
+  footers, setup-watch label). Pattern detection, SL/TP ratios, and
+  management unchanged.
+- Verified: bash -n, Python compile, weekend-filter reconstruction on
+  real Twelve Data H1 (bug value reproduced pre-filter, sane value
+  post-filter), 7-case cooldown logic test, `tests/test_signals.py`
+  pass, dry-run with state + journal untouched (log shows
+  `h1-weekend-filtered:66`).
+
 ## v2.6 (2026-10-16, owner-approved)
 
 - Donchian(48) H1 entry trigger DISABLED via `DONCHIAN_TRIGGER_ENABLED =
