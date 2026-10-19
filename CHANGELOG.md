@@ -28,6 +28,14 @@ without the owner's explicit approval.
   post-filter), 7-case cooldown logic test, `tests/test_signals.py`
   pass, dry-run with state + journal untouched (log shows
   `h1-weekend-filtered:66`).
+- Follow-up fix (same day): the cooldown read only `last_entry_ts`,
+  which v2.6 never wrote — so the first v2.7 entry (SELL @4162) stacked
+  on a v2.6 entry (SELL @4159) 30 minutes earlier. The cooldown now
+  also reads the newest same-direction entry from the journal (the
+  durable source of truth, same self-heal principle as `active_trade`),
+  covering both the upgrade bootstrap and state-file loss. Verified:
+  4-case journal-fallback test on the real journal (incl. the @4162
+  counterfactual → blocked), compile, dry-run untouched.
 
 ## v2.6 (2026-10-16, owner-approved)
 

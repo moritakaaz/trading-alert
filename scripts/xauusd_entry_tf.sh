@@ -1388,6 +1388,25 @@ if st.get("paused_until", 0) > now:
 # is unaffected. Opposite-direction signals are not blocked.
 _le = st.get("last_entry_ts") or {}
 _le_last = _le.get(sig)
+# v2.7 fix (same day): the journal is the durable source of truth (same
+# self-heal principle as active_trade). last_entry_ts only exists for
+# entries fired by v2.7+ code, so without this fallback the cooldown was
+# blind to entries fired just before the upgrade (SELL @4159 fired under
+# v2.6, then SELL @4162 stacked 30 min later under v2.7). Also covers
+# state-file loss. The current signal is not journaled yet at this point,
+# so the journal only ever shows PREVIOUS entries.
+try:
+    import csv as _csv_cd
+    with open(JOURNAL_FILE, newline="") as _jf:
+        for _row in _csv_cd.DictReader(_jf):
+            if _row.get("signal") == sig and _row.get("alert_time_utc"):
+                _jt = int(datetime.datetime.strptime(
+                    _row["alert_time_utc"], "%Y-%m-%dT%H:%M:%SZ"
+                ).replace(tzinfo=datetime.timezone.utc).timestamp())
+                if not _le_last or _jt > _le_last:
+                    _le_last = _jt
+except Exception as _ex:
+    log(HOOK_ID, f"cooldown-journal-read-fail:{str(_ex)[:40]}")
 if _le_last and now - _le_last < ENTRY_COOLDOWN_SECS:
     if pattern:
         save_state_keys({"pattern_p2_t": pattern["p2_t"]})
