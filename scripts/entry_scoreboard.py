@@ -169,6 +169,8 @@ def main():
                 return
             if fieldnames and "strategy_v" not in fieldnames:
                 fieldnames = fieldnames + ["strategy_v"]
+            if fieldnames and "grade" not in fieldnames:
+                fieldnames = fieldnames + ["grade"]
             if not fieldnames and rows:
                 fieldnames = list(rows[0].keys())
             if fieldnames:

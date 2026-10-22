@@ -135,6 +135,10 @@ def save_journal_rows(update_fn):
                 fieldnames = fieldnames + ["timeframe"]
                 for r in rows:
                     r.setdefault("timeframe", "m5")
+            if fieldnames and "grade" not in fieldnames:
+                fieldnames = fieldnames + ["grade"]
+                for r in rows:
+                    r.setdefault("grade", "")
             if not fieldnames and rows:
                 fieldnames = list(rows[0].keys())
             if fieldnames:
@@ -1736,15 +1740,22 @@ if os.environ.get("HATCH_HOOK_DRY_RUN") != "1":
         # v2.1 brutal: -dtb = double top/bottom touch, -donch = Donchian breakout
         sv = STRATEGY_VERSION + "-" + ("dtb" if pattern["kind"] in ("DOUBLE TOP", "DOUBLE BOTTOM")
                        else "donch")
+        # grade logging (2026-10-23, user-approved): record pattern quality
+        # (e.g. "B72") so future reviews can split performance by grade.
+        # Logging only — grade still never filters or changes the signal.
+        _gv = pattern.get("grade") or ""
+        _gs = pattern.get("score")
+        _grade_val = f"{_gv}{_gs}" if (_gv and _gs is not None) else _gv
         row = {"alert_time_utc": bar_iso, "signal": sig, "entry_ref": price,
                "sl_d": sl_d, "tp1_d": tp1_d, "tp2_d": tp2_d, "tp3_d": tp3_d,
                "status": "open", "outcome": "", "closed_time_utc": "",
                "max_tp": "", "r_multiple": "", "strategy_v": sv,
-               "timeframe": TF}
-        # backfill strategy_v / timeframe for old rows missing them
+               "timeframe": TF, "grade": _grade_val}
+        # backfill strategy_v / timeframe / grade for old rows missing them
         for r in rows:
             r.setdefault("strategy_v", "1.0")
             r.setdefault("timeframe", "m5")
+            r.setdefault("grade", "")
         rows.append(row)
         return True
     try:

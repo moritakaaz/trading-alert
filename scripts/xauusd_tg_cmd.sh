@@ -221,6 +221,10 @@ def save_journal_rows(update_fn):
                 fieldnames = fieldnames + ["strategy_v"]
                 for r in rows:
                     r.setdefault("strategy_v", "1.0")
+            if fieldnames and "grade" not in fieldnames:
+                fieldnames = fieldnames + ["grade"]
+                for r in rows:
+                    r.setdefault("grade", "")
             if not fieldnames and rows:
                 fieldnames = list(rows[0].keys())
             if fieldnames:

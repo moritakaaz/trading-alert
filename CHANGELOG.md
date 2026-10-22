@@ -4,6 +4,23 @@ All notable changes, newest first. Strategy parameters (ATR 14, N=2,
 5–50 bars, Donchian 48, SL 1.5×ATR, TP 1R/1.5R/2R) are never changed
 without the owner's explicit approval.
 
+## 2026-10-23 — journal grade logging (owner-approved, no strategy change)
+
+- Journal gains a `grade` column (e.g. `B72` = grade letter + score) on
+  every new entry row, written by the engine's `_append_signal`. All
+  three journal writers (engine, command handler, scoreboard) migrate
+  the column in if missing; existing rows keep an empty grade (past
+  grades were never recorded and are not reconstructed). Grade remains
+  informational only — it still never filters or changes a signal.
+  Reason: the 2026-10-23 journal review could not split performance by
+  grade because it was never persisted.
+- Research (offline, no live effect): `research/buy_variants_backtest.py`
+  + `buy_variants_RESULTS.md` — BUY-restriction variants on Jan–Oct
+  PAXGUSDT M5. Verdict: do NOT restrict BUY (BASE PF 1.24 / +63.0R beats
+  SELL-ONLY 1.21 / +43.4R, BUY+EMA-H1 1.21 / +50.0R, BUY+GRADE-AB
+  1.19 / +48.1R); the live October BUY bleed is a regime effect. Grade
+  does not separate losers in backtest either (A 1.42 / B 1.16 / C 1.26).
+
 ## v2.7 (2026-10-19, owner-delegated)
 
 - Weekend-bar filter (bug fix): H1 bars inside the weekend close window
