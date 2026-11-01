@@ -325,6 +325,9 @@ HELP = ("🤖 <b>XAUUSD alert bot commands</b>\n"
         "/alert_on_m15 — turn M15 alerts on\n"
         "/alert_off_m15 — turn M15 alerts off\n"
         "/alert_status — system status (all TFs)\n"
+        "/auto_on — enable auto-trade execution to MT5 (demo first!)\n"
+        "/auto_off — disable auto-trade execution\n"
+        "/auto_status — auto-trade execution status\n"
         "/check — status + last signal\n"
         "/chart — live XAUUSD chart + data\n"
         "/trend — current H1 & M15 trend\n"
@@ -1054,6 +1057,24 @@ def handle(text):
         return (f"{_e} <b>XAUUSD {_tf.upper()} alerts turned {_w}.</b>\n"
                 f"Send /alert_{'off' if _turn_on else 'on'}_{_tf} to turn them "
                 f"{'off' if _turn_on else 'on'} again.")
+    if cmd == "/auto_on":
+        save_state({"auto_trade": True})
+        return ("🤖 <b>Auto-trade execution ON.</b>\n"
+                "Confirmed M5 ENTRY signals will also be sent to the MT5 "
+                "executor (bridge + ExecutorEA).\n"
+                "⚠️ Make sure MT5 is running the DEMO account with the EA "
+                "attached before real signals arrive.")
+    if cmd == "/auto_off":
+        save_state({"auto_trade": False})
+        return ("🤖 <b>Auto-trade execution OFF.</b>\n"
+                "Signals stay alert-only (Telegram + journal). "
+                "Open MT5 positions are NOT closed by this.")
+    if cmd == "/auto_status":
+        _at = load_state().get("auto_trade", False)
+        _e = "🟢" if _at else "🔴"
+        return (f"{_e} <b>Auto-trade execution: {'ON' if _at else 'OFF'}</b>\n"
+                "When ON, confirmed M5 ENTRY signals are published to the "
+                "MT5 executor. Default is OFF.")
     if cmd == "/alert_status":
         # concise: TF on/off only
         _lines = ["🤖 <b>XAUUSD alerts</b>"]

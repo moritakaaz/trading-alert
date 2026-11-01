@@ -1794,6 +1794,35 @@ if _tg_ok:
     _le_save[sig] = now
     save_state_keys({"last_bar": bar_iso, "pattern_p2_t": pattern["p2_t"],
                      "last_entry_ts": _le_save})
+    # --- auto-trade execution publish (user-approved 2026-11-01) ---
+    # Only when /auto_on was given (global auto_trade flag, default OFF)
+    # and only for the M5 feed. Publishes the confirmed ENTRY to the
+    # private push channel that bridge.py (Windows, next to MT5) listens
+    # to; ExecutorEA then places the order on the demo/live account.
+    # Distances only: the EA recomputes SL/TP from its actual fill price.
+    # Any failure here is logged and NEVER affects the alert itself.
+    try:
+        if TF == "m5" and _global_setting("auto_trade", False):
+            _ecfg = json.load(open(os.path.expanduser(
+                "~/hooks/state/exec_config.json")))
+            _payload = {"id": f"{bar_iso}-{sig}", "signal": sig,
+                        "sl_d": sl_d, "tp1_d": tp1_d, "tp2_d": tp2_d,
+                        "tp3_d": tp3_d, "secret": _ecfg["secret"]}
+            _req = urllib.request.Request(
+                _ecfg.get("ntfy_base", "https://ntfy.sh") + "/" + _ecfg["topic"],
+                data=json.dumps(_payload).encode(),
+                headers={"Content-Type": "application/json",
+                         "Title": "XAUUSD ENTRY " + sig,
+                         "Tags": "moneybag"})
+            urllib.request.urlopen(_req, timeout=10).read()
+            with open(os.path.expanduser(
+                    "~/hooks/state/exec_published.jsonl"), "a") as _lf:
+                _lf.write(json.dumps(
+                    {"ts": now, "id": _payload["id"], "signal": sig,
+                     "sl_d": sl_d, "tp1_d": tp1_d}) + "\n")
+            log(HOOK_ID, f"exec-published:{_payload['id']}")
+    except Exception as _ex:
+        log(HOOK_ID, f"exec-publish-fail:{str(_ex)[:60]}")
 else:
     log(HOOK_ID, "tg-send-failed-dedupe-not-saved-will-retry")
 out("wake", f"{HOOK_ID}-{sig.lower()}",

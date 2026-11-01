@@ -4,6 +4,27 @@ All notable changes, newest first. Strategy parameters (ATR 14, N=2,
 5–50 bars, Donchian 48, SL 1.5×ATR, TP 1R/1.5R/2R) are never changed
 without the owner's explicit approval.
 
+## 2026-11-01 — MT5 auto-trade executor (owner-approved, OFF by default)
+
+- New `executor/` folder: `ExecutorEA.mq5` (dumb MT5 executor, no
+  signal logic), `bridge.py` (Windows bridge: push channel -> MT5
+  Common Files queue), `README.md` (install + chain test), and an
+  example bridge config. Real credentials live outside the repo.
+- Engine: after a confirmed M5 ENTRY is sent to Telegram, the signal's
+  distances (never the reference price) are also published to the
+  executor channel **only** when the global `auto_trade` flag is on
+  (default OFF). Publishing failures are logged and never affect the
+  alert. Setup watches are never published.
+- Executor safety: unique signal id with two-layer dedupe (bridge +
+  EA processed-ids file), SL/TP recomputed from the actual MT5 fill,
+  fixed 0.01 lot, max 3 open executor positions, max spread 0.60, full
+  take-profit at TP1 distance (0.01 lot cannot be split; matches the
+  journal model). Failed orders are recorded, never retried in a loop.
+- Command handler: `/auto_on`, `/auto_off`, `/auto_status` (also added
+  to `/help`). Demo-account phase first; live use is a separate,
+  later decision that also needs the private-transport upgrade.
+- Strategy logic and parameters are unchanged.
+
 ## 2026-10-23 — journal grade logging (owner-approved, no strategy change)
 
 - Journal gains a `grade` column (e.g. `B72` = grade letter + score) on
