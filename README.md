@@ -1,225 +1,82 @@
-# XAUUSD Telegram Manual-Alert System
+# XAUUSD Telegram Alert
 
-> ⚠️ **Not financial advice.** An experimental project — the funds used are
-> "learning money" (a small cent account). Do not use for live trading
-> without understanding the risks.
+Manual-alert system for XAUUSD (gold). Watches the M5 chart, sends entry
+signals to Telegram, journals every signal, and scores the results.
 
-An **XAUUSD** multi-timeframe entry-alert system that pushes signals to Telegram:
-pattern breakouts, automatic journaling, entry charts,
-position monitoring (TP1/TP2/TP3 + breakeven), and weekly performance reviews.
+Not financial advice. Experimental — the account behind this is a small
+cent account ("learning money").
 
-Three independent alert systems: **M1** (1-min poll), **M5** (5-min poll),
-**M15** (5-min poll). Each has its own on/off switch and journal.
+## What it does
 
-## Strategy (v2.7, live)
+- Detects double top / double bottom patterns on M5, confirms on candle close
+- Sends entry alerts to Telegram with SL/TP levels and a chart
+- Tracks open signals until TP or SL, journals everything to CSV
+- Daily scoreboard and a weekly review, both from the journal
+- Optional MT5 executor (demo phase) — see `executor/`
 
-> Experimental — no trend filter, single pattern trigger, quality-scored.
+M1 and M15 wrappers exist but are unvalidated and normally off.
+M5 is the only live timeframe.
 
-| Component | Detail |
-|---|---|
-| Trigger 1 (only) | Double top/bottom on signal TF: M5 fractal peaks/valleys (N=2), \|p1-p2\| ≤ 0.25×ATR(H1), 5–50 bars apart, intervening extreme ≥3 bars from each side, no higher-high/lower-low between peaks (clean check), confirmation = close beyond neckline with right color. p1 = nearest peak forming a valid pattern |
-| Trigger 2 | Donchian(48) breakout — **DISABLED in v2.6** (`DONCHIAN_TRIGGER_ENABLED = False` in `xauusd_entry_tf.sh`). Breakouts are still detected and logged (`donchian-disabled`) for later review, but produce no entry signals. Re-enable by flipping the flag |
-| Quality score | Every pattern scored 0-100 (Grade A/B/C): peak match 25 + RSI divergence 20 + height 15 + symmetry 10 + prior trend 15. Shown in alerts and logged to the journal (`grade` column, since 2026-10-23); informational only, never a filter |
-| Stop loss | 1.5 × ATR(14) H1 — computed on real market-hours bars only; synthetic weekend bars are filtered out first (v2.7) |
-| Take profit | TP1 1R → SL to breakeven, TP2 1.5R, TP3 2R (runner) |
-| Trend filter | **REMOVED** — all signals fire, both directions |
-| Management | Multi-position: new signals fire even with open trades; every open trade is monitored for SL/TP on every poll |
-| Anti-stacking | Same-direction entry cooldown 2h (`ENTRY_COOLDOWN_SECS`): after an entry fires, same-direction entries are suppressed and the blocked pattern is consumed (v2.7) |
+## Strategy (v2.7, live since 2026-10-19)
 
-**v2.6 change (2026-10-16, owner-approved):** Donchian entry trigger disabled.
-Live journal evidence (61 signals, 8–16 Oct 2026, 58 closed, total −11.67R):
-Donchian entries scored 5 TP vs 18 SL = **−12.67R** (PF 0.30), and stayed
-negative (−5R) even in a simulated one-entry-per-breakout dedupe, while double
-top/bottom patterns were the only non-losing trigger (33 closed, +1.00R).
-One day (14 Oct, CPI) produced 20 signals / 18 SL / −16R, mostly stacked
-Donchian re-breaks of the same move. The Donchian channel is still drawn on
-charts; only the entry trigger is off.
+- Trigger: double top/bottom only. Fractal peaks/valleys (N=2), peaks
+  within 0.25×ATR(H1), 5–50 bars apart, no higher-high/lower-low between
+  peaks. A close beyond the neckline with the right candle color confirms.
+- The Donchian(48) breakout trigger is disabled since v2.6 — it lost
+  money live (−12.67R). Breakouts are still logged, not traded.
+- No trend filter.
+- SL = 1.5×ATR(14) on H1 (weekend bars filtered out first).
+  TP1 = 1R (then SL to breakeven), TP2 = 1.5R, TP3 = 2R.
+- Each pattern gets a quality grade (A/B/C). Shown in alerts and logged
+  to the journal. Never used as a filter.
+- 2h cooldown after an entry in the same direction.
+- Multiple positions can be open at once; all are monitored every poll.
 
-**v2.7 changes (2026-10-19, owner-delegated):** two fixes after a −7R day
-(7 signals, 7 SL) exposed stacked entries and a data bug. (1) **Weekend-bar
-filter:** Twelve Data fills the closed weekend (Fri 21:00 → Sun 22:00 UTC)
-with synthetic flat H1 bars (range ≈ $0.25); left in, they collapsed
-ATR(14) to $2.10 at the Monday open, producing a $3 stop that was hit in
-17 minutes. All 8 lifetime signals with sl_d ≤ $10 fired in the
-Sun 22:00–Mon 04:05 UTC window. H1 bars inside the close window are now
-excluded before ATR/EMA/Donchian use, and the H1 fetch was raised
-80 → 200 bars so ≥62 real bars remain (verified: same reconstruction now
-gives ATR $14.91 → sl_d $22). (2) **Same-direction cooldown 2h:** stacked
-same-direction entries are one correlated bet (19 Oct: 3 BUYs closed the
-same second). A journal simulation of the 2h cooldown over 8–19 Oct kept
-−7.68R of a −22.35R baseline; the skipped signals were worth −14.67R.
-Cooldown reduces damage; it does not create an edge — the pattern baseline
-remains ≈ breakeven and is still being evaluated.
+## Results
 
-**v2.5 reliability fixes:**
-- SL/TP + runner monitoring runs on **every poll** (not just via heartbeat)
-- Liveness (`last_run`) separated from heartbeat gate (`last_heartbeat`)
-- Telegram poller isolates per-update errors; offset advances per update
-- SL/TP monitoring continues even when alerts are off (positions are real)
-- Scoreboard: TP1+BE = +1R (full-position model), closed bars only
-- Setup Watch alerts: single message (photo+caption), includes Entry/SL/TP1/TP2/TP3 levels and BUY STOP/SELL STOP guidance
+Live journal, snapshot 2026-11-04 (TP1 + breakeven scoring):
 
-**Honest backtest results** (double top/bottom v2.3, first-valid p1, 9 months
-Jan–Oct 2026, 538 trades, PAXGUSDT M5 data):
+- v2.7: 59 closed, 57.6% win rate, **+10.94R**, PF 1.47, max drawdown 6R
+- All-time: 141 closed, **−9.41R** — the loss comes from the old Donchian
+  era (28 signals, −16.67R). Pattern-only eras: v2.5 +1.00R, v2.6 −4.68R,
+  v2.7 +10.94R.
 
-| Metric | Value |
-|---|---|
-| Profit Factor | **1.13** |
-| Win rate | 34.2% |
-| Average / trade | +0.08R |
-| Total | +40.4R |
-| Max drawdown | 26.7R |
-| Frequency | 1.92 trades/day |
+At a fixed 0.01 lot on a Rp100,000 deposit, v2.7 would be +Rp44,457 so
+far. That is journal math, not broker PnL, and excludes spread/slippage.
 
-Honest notes: the no-filter + dual-trigger combo was NOT backtested — only the
-close-confirmed pattern version above (touch entry was tried and reverted:
-a wick that closes back means the level held). Sep–Oct 2026 was weak
-(PF 0.79, −8.9R). v2.4's clean check is not yet backtested. Q3 2026 was a
-losing quarter. Excludes spread/commission/slippage — live results **will be
-worse**. These numbers are not a promise. The journal judges.
+Backtest of the pattern strategy (Jan–Oct 2026, 538 trades, PAXGUSDT M5):
+PF 1.13, win rate 34.2%, max drawdown 26.7R. Details in `research/`.
 
-## Live journal results (snapshot 2026-11-04)
+Small samples everywhere. Nothing here is proven.
 
-Scored from `entry_journal.csv` by the scoreboard (TP1 + breakeven model:
-win = +1R at TP1, loss = −1R at SL; expired trades record their actual R).
+## Commands
 
-**v2.7 only** (live since 2026-10-19, 59 closed signals):
+- Alerts: `/alert_on_m5` `/alert_off_m5` `/alert_status` (same pattern for M1/M15)
+- Status: `/check` `/chart` `/trend` `/history` `/export_journal`
+- Trades: `/skip_trade` `/close_trade` `/cancel_trade` `/reset_trade`
+- Account: `/set_balance` `/set_risk` `/set_lot` `/lot_calc`
+- Executor: `/auto_on` `/auto_off` `/auto_status` (off by default)
 
-| Metric | Value |
-|---|---|
-| Win rate | **57.6%** (34 W / 25 L) |
-| Total | **+10.94R** |
-| Profit Factor (R) | **1.47** |
-| Max drawdown | 6.0R |
-| Expectancy | +0.19R / trade |
+## Layout
 
-**All-time** (141 closed signals, 8 Oct – 4 Nov 2026, all versions):
-win rate 45.7%, total **−9.41R**, PF 0.87. The negative all-time total is
-entirely the retired Donchian-trigger era (v2.5-donch: 28 signals, −16.67R,
-PF 0.24). The pattern-only eras are mixed (v2.5-dtb +1.00R, v2.6-dtb −4.68R,
-v2.7-dtb +10.94R) and the samples are still small — treat the edge as
-promising, not proven.
+- `scripts/` — engine, command handler, charts, scoreboard, watchdog
+- `data/` — price feed (Twelve Data, Kraken fallback), news, calendar
+- `executor/` — MT5 executor and Windows bridge
+- `research/` — backtests and results, failures included
+- `tests/` — signal regression tests (8)
 
-Hypothetical money translation (every signal taken at a fixed 0.01 lot,
-deposit Rp100,000 ≈ 600 USC, excluding spread/slippage): v2.7 nets
-**+Rp44,457 (+44.5%)**. This is journal performance, not broker PnL — it
-assumes no signal was skipped or closed manually.
+## Setup
 
-Superseded: v1.2 (Donchian + H4 + EMA-H1 filter, PF 1.38), v2.0
-(double top/bottom with M15+H1 EMA agreement filter, PF 1.22),
-v2.1 (greedy-nearest p1, PF 1.18, n=259).
+Needs a Telegram bot token, a Twelve Data API key, and cron (or similar)
+to run the pollers. Finnhub (news) and FRED (calendar) keys are optional.
+Copy `.env.example` to `.env` and fill it in. Script paths default to
+`~/hooks/` — adjust to your setup.
 
-## Architecture
+## Open issues
 
-```
-scripts/
-├── xauusd_entry_tf.sh    # Core engine: parameterized by TF env var (m1/m5/m15)
-├── xauusd_entry_m1.sh    # M1 wrapper (TF=m1, 60s poll)
-├── xauusd_entry_m5tf.sh  # M5 wrapper (TF=m5, 300s poll)
-├── xauusd_entry_m15.sh   # M15 wrapper (TF=m15, 300s poll)
-├── xauusd_tg_cmd.sh      # Telegram command handler (/check, /chart, /history, ...)
-├── make_chart.py         # Entry chart renderer: pattern/Donchian + SL/TP levels
-├── entry_scoreboard.py   # Learning loop: scores every signal, weekly review
-├── xauusd_watchdog.py    # Dead man's switch: keeps the system alive
-└── send_tg.py            # Telegram sender (direct Bot API)
-
-data/
-├── xauusd_ohlc.py        # XAU/USD price feed (Twelve Data 1min/5min/15min/1h, Kraken fallback)
-├── forex_news.py         # Forex news headlines (Finnhub) — keyword warnings
-└── release_calendar.py   # Economic calendar: NFP/CPI/PPI/GDP (FRED)
-
-research/                 # Backtests + result reports (failures documented too)
-
-executor/                 # Optional MT5 auto-trade executor (demo phase)
-├── ExecutorEA.mq5        # Dumb MT5 executor: no signal logic, places orders
-├── bridge.py             # Windows bridge: push channel -> MT5 Common Files
-└── README.md             # Install, chain test, troubleshooting
-```
-
-**Tested and REJECTED** (so you don't repeat them): EMA-cross as entry trigger,
-session filter, 2.0×ATR stop loss, 0.75R TP1, breakout-depth filter, volatility
-filter, M5/M15 EMA as filters, post-SL cooldown. See `research/*_RESULTS.md`.
-
-## Installation
-
-```bash
-git clone <repo-url>
-cd xauusd-telegram-alert
-cp .env.example .env
-# fill in TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TWELVE_DATA_API_KEY in .env
-```
-
-1. Create a bot via [@BotFather](https://t.me/BotFather), note the token and your chat ID.
-2. Get a free API key from [Twelve Data](https://twelvedata.com) (primary feed).
-   Optional: [Finnhub](https://finnhub.io) (news), [FRED](https://fred.stlouisfed.org) (calendar).
-3. Adjust the state/log paths in the scripts to your environment
-   (defaults point to `~/hooks/state/` and `~/hooks/logs/`).
-4. Run the alert pollers via cron (example crontab):
-   ```cron
-   # M1 entry alerts (1-min poll)
-   * * * * * /path/to/scripts/xauusd_entry_m1.sh
-   # M5 entry alerts (5-min poll)
-   */5 * * * * /path/to/scripts/xauusd_entry_m5tf.sh
-   # M15 entry alerts (5-min poll)
-   */5 * * * * /path/to/scripts/xauusd_entry_m15.sh
-   # Watchdog (dead man's switch, 10-min)
-   */10 * * * * python3 /path/to/scripts/xauusd_watchdog.py
-   # Scoreboard (daily P&L review, ~00:23 UTC)
-   23 0 * * * python3 /path/to/scripts/entry_scoreboard.py
-   # Telegram command handler (30s poll — use systemd or a loop)
-   * * * * * /path/to/scripts/xauusd_tg_cmd.sh
-   ```
-   Each timeframe is independent — enable only the ones you want.
-
-   **Environment variables** (or `.env` in repo root):
-   - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` (required)
-   - `TWELVE_DATA_API_KEY` (price feed)
-   - `FINNHUB_API_KEY` (news, optional)
-   - `FRED_API_KEY` (calendar, optional)
-   - `CHART_DIR` (chart output dir, default `~/workspace/trading-ea/charts`)
-   - `NEWS_MAX_AGE_HOURS` (default 12), `CALENDAR_WARN_MINUTES` (default 30)
-
-> Note: the scripts were built for a specific VM setup with a custom credential
-> pattern (`dynamic_credentials` surrogate). On other environments, replace the
-> API calls in `data/*.py` with your API key from `.env` directly.
-
-## Telegram Commands
-
-**Alerts (per timeframe, independent):**
-`/alert_on_m5` `/alert_off_m5` — M5 (default; `/alert_on`/`/alert_off` also work)
-`/alert_on_m1` `/alert_off_m1` — M1
-`/alert_on_m15` `/alert_off_m15` — M15
-`/alert_status` — concise ON/OFF per TF
-
-**Info & management:**
-`/menu` — interactive button menu (categorized)
-`/check` — full status + last signal + active position
-`/chart` — live chart + data
-`/trend` — H1 & M15 trend (info only, no filter)
-`/history` — signals + results (paginated, 10/page with Next/Prev)
-`/export_journal` — export journal CSV by day/week/month/year
-`/set_balance` `/set_risk` `/set_lot` `/lot_calc`
-`/skip_trade` `/close_trade` `/cancel_trade` `/reset_trade`
-
-**Auto-trade executor (MT5, demo phase, OFF by default):**
-`/auto_on` — start publishing confirmed M5 entries to the executor channel
-`/auto_off` — stop publishing (does NOT close open MT5 positions)
-`/auto_status` — show the current auto-trade flag
-See `executor/README.md` for setup. Publishing is off unless `/auto_on` was
-sent; the strategy itself never changes.
-
-## Reliability (P0-P3 fixes, Oct 2026)
-
-Most of the 57 findings from the Oct 2026 code review have been addressed:
-- **P0**: Alert text/chart delivery, Setup Watch accuracy, per-TF controls, dedupe safety
-- **P1**: Price display, version consistency, scoreboard accuracy, retry logic, token security
-- **P2**: Code cleanup, shared modules, documentation sync
-- **P3**: Testable signal module (`signals.py`) with 8 regression tests, log rotation
-- **Still open**: findings B20, B21, B22, B32, B44, a legacy M5 engine audit,
-  and full command regression tests (only the pure-signal tests exist so far)
-
-**Language policy:** All user-facing text (alerts, commands, README) is English only.
+From the Oct 2026 code review, still open: B20, B21, B22, B32, B44, a
+legacy M5 engine audit, and full command regression tests.
 
 ## License
 
-MIT — use, modify, and share freely. The risk is yours.
+MIT. The risk is yours.
