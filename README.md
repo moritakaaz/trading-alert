@@ -19,11 +19,11 @@ Three independent alert systems: **M1** (1-min poll), **M5** (5-min poll),
 |---|---|
 | Trigger 1 (only) | Double top/bottom on signal TF: M5 fractal peaks/valleys (N=2), \|p1-p2\| ≤ 0.25×ATR(H1), 5–50 bars apart, intervening extreme ≥3 bars from each side, no higher-high/lower-low between peaks (clean check), confirmation = close beyond neckline with right color. p1 = nearest peak forming a valid pattern |
 | Trigger 2 | Donchian(48) breakout — **DISABLED in v2.6** (`DONCHIAN_TRIGGER_ENABLED = False` in `xauusd_entry_tf.sh`). Breakouts are still detected and logged (`donchian-disabled`) for later review, but produce no entry signals. Re-enable by flipping the flag |
-| Quality score | Every pattern scored 0-100 (Grade A/B/C): peak match 25 + RSI divergence 20 + height 15 + symmetry 10 + prior trend 15. Shown in alerts, informational only |
+| Quality score | Every pattern scored 0-100 (Grade A/B/C): peak match 25 + RSI divergence 20 + height 15 + symmetry 10 + prior trend 15. Shown in alerts and logged to the journal (`grade` column, since 2026-10-23); informational only, never a filter |
 | Stop loss | 1.5 × ATR(14) H1 — computed on real market-hours bars only; synthetic weekend bars are filtered out first (v2.7) |
 | Take profit | TP1 1R → SL to breakeven, TP2 1.5R, TP3 2R (runner) |
 | Trend filter | **REMOVED** — all signals fire, both directions |
-| Management | Multi-position: new signals fire even with open trades; bot tracks latest for SL/TP |
+| Management | Multi-position: new signals fire even with open trades; every open trade is monitored for SL/TP on every poll |
 | Anti-stacking | Same-direction entry cooldown 2h (`ENTRY_COOLDOWN_SECS`): after an entry fires, same-direction entries are suppressed and the blocked pattern is consumed (v2.7) |
 
 **v2.6 change (2026-10-16, owner-approved):** Donchian entry trigger disabled.
@@ -78,6 +78,33 @@ a wick that closes back means the level held). Sep–Oct 2026 was weak
 losing quarter. Excludes spread/commission/slippage — live results **will be
 worse**. These numbers are not a promise. The journal judges.
 
+## Live journal results (snapshot 2026-11-04)
+
+Scored from `entry_journal.csv` by the scoreboard (TP1 + breakeven model:
+win = +1R at TP1, loss = −1R at SL; expired trades record their actual R).
+
+**v2.7 only** (live since 2026-10-19, 59 closed signals):
+
+| Metric | Value |
+|---|---|
+| Win rate | **57.6%** (34 W / 25 L) |
+| Total | **+10.94R** |
+| Profit Factor (R) | **1.47** |
+| Max drawdown | 6.0R |
+| Expectancy | +0.19R / trade |
+
+**All-time** (141 closed signals, 8 Oct – 4 Nov 2026, all versions):
+win rate 45.7%, total **−9.41R**, PF 0.87. The negative all-time total is
+entirely the retired Donchian-trigger era (v2.5-donch: 28 signals, −16.67R,
+PF 0.24). The pattern-only eras are mixed (v2.5-dtb +1.00R, v2.6-dtb −4.68R,
+v2.7-dtb +10.94R) and the samples are still small — treat the edge as
+promising, not proven.
+
+Hypothetical money translation (every signal taken at a fixed 0.01 lot,
+deposit Rp100,000 ≈ 600 USC, excluding spread/slippage): v2.7 nets
+**+Rp44,457 (+44.5%)**. This is journal performance, not broker PnL — it
+assumes no signal was skipped or closed manually.
+
 Superseded: v1.2 (Donchian + H4 + EMA-H1 filter, PF 1.38), v2.0
 (double top/bottom with M15+H1 EMA agreement filter, PF 1.22),
 v2.1 (greedy-nearest p1, PF 1.18, n=259).
@@ -102,6 +129,11 @@ data/
 └── release_calendar.py   # Economic calendar: NFP/CPI/PPI/GDP (FRED)
 
 research/                 # Backtests + result reports (failures documented too)
+
+executor/                 # Optional MT5 auto-trade executor (demo phase)
+├── ExecutorEA.mq5        # Dumb MT5 executor: no signal logic, places orders
+├── bridge.py             # Windows bridge: push channel -> MT5 Common Files
+└── README.md             # Install, chain test, troubleshooting
 ```
 
 **Tested and REJECTED** (so you don't repeat them): EMA-cross as entry trigger,
@@ -169,13 +201,22 @@ cp .env.example .env
 `/set_balance` `/set_risk` `/set_lot` `/lot_calc`
 `/skip_trade` `/close_trade` `/cancel_trade` `/reset_trade`
 
+**Auto-trade executor (MT5, demo phase, OFF by default):**
+`/auto_on` — start publishing confirmed M5 entries to the executor channel
+`/auto_off` — stop publishing (does NOT close open MT5 positions)
+`/auto_status` — show the current auto-trade flag
+See `executor/README.md` for setup. Publishing is off unless `/auto_on` was
+sent; the strategy itself never changes.
+
 ## Reliability (P0-P3 fixes, Oct 2026)
 
-All 57 findings from the code review have been addressed:
+Most of the 57 findings from the Oct 2026 code review have been addressed:
 - **P0**: Alert text/chart delivery, Setup Watch accuracy, per-TF controls, dedupe safety
 - **P1**: Price display, version consistency, scoreboard accuracy, retry logic, token security
 - **P2**: Code cleanup, shared modules, documentation sync
 - **P3**: Testable signal module (`signals.py`) with 8 regression tests, log rotation
+- **Still open**: findings B20, B21, B22, B32, B44, a legacy M5 engine audit,
+  and full command regression tests (only the pure-signal tests exist so far)
 
 **Language policy:** All user-facing text (alerts, commands, README) is English only.
 

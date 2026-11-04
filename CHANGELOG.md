@@ -4,6 +4,22 @@ All notable changes, newest first. Strategy parameters (ATR 14, N=2,
 5–50 bars, Donchian 48, SL 1.5×ATR, TP 1R/1.5R/2R) are never changed
 without the owner's explicit approval.
 
+## 2026-11-04 — documentation sync (no code or strategy change)
+
+- README: new "Live journal results" section with a dated snapshot
+  (v2.7 as of 2026-11-04: 59 closed, win rate 57.6%, +10.94R, PF 1.47;
+  all-time 141 closed, −9.41R, dragged by the retired Donchian era),
+  including the hypothetical fixed-0.01-lot money translation and the
+  journal-vs-broker disclaimer.
+- README: Telegram command list now includes the executor commands
+  (`/auto_on`, `/auto_off`, `/auto_status`); `executor/` added to the
+  architecture listing.
+- README: corrected the reliability section — it claimed all 57 code
+  review findings were addressed; B20, B21, B22, B32, B44, the legacy
+  M5 engine audit, and full command regression tests are still open.
+- README: management wording fixed (all open trades are monitored, not
+  just the latest); quality-score row notes the journal `grade` column.
+
 ## 2026-11-01 — MT5 auto-trade executor (owner-approved, OFF by default)
 
 - New `executor/` folder: `ExecutorEA.mq5` (dumb MT5 executor, no
